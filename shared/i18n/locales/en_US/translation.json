@@ -305,6 +305,7 @@
   "Collections are used to group documents and choose permissions": "Collections are used to group documents and choose permissions",
   "Name": "Name",
   "The default access for workspace members. You can share with more users or groups later.": "The default access for workspace members. You can share with more users or groups later.",
+  "Only admins can give all workspace members access. You can share with users or groups later.": "Only admins can give all workspace members access. You can share with users or groups later.",
   "Advanced options": "Advanced options",
   "Saving": "Saving",
   "Save": "Save",

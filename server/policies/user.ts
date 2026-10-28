@@ -12,11 +12,14 @@ import {
 
 allow(User, "read", User, isTeamModel);
 
+// Viewers are treated like guests here so that external users (such as clients)
+// invited as viewers cannot browse the workspace member directory.
 allow(User, "listUsers", Team, (actor, team) =>
   and(
     //
     isTeamModel(actor, team),
-    !actor.isGuest
+    !actor.isGuest,
+    !actor.isViewer
   )
 );
 

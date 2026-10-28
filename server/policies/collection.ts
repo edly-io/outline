@@ -22,6 +22,17 @@ allow(User, "createCollection", Team, (actor, team) =>
   )
 );
 
+// Only admins can give a collection default access for the whole workspace, so
+// that external users (such as clients invited as viewers) cannot be exposed to
+// internal content by mistake.
+allow(User, "createWorkspaceCollection", Team, (actor, team) =>
+  and(
+    //
+    isTeamAdmin(actor, team),
+    isTeamMutable(actor)
+  )
+);
+
 allow(User, "importCollection", Team, (actor, team) =>
   and(
     //
