@@ -157,7 +157,7 @@ function Invite({ onSubmit }: Props) {
       ...memo,
       {
         type: "item",
-        label: t("Editor"),
+        label: t("Member"),
         description: t("Can create, edit, and delete documents"),
         value: UserRole.Member,
       },

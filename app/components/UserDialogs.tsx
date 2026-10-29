@@ -2,6 +2,7 @@ import { observer } from "mobx-react";
 import * as React from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { UserRoleHelper } from "@shared/utils/UserRoleHelper";
 import { errToString } from "@shared/utils/error";
 import { UserRole } from "@shared/types";
 import { UserValidation } from "@shared/validations";
@@ -42,13 +43,14 @@ export function UserChangeRoleDialog({
     onSubmit();
   };
 
+  const roleName = UserRoleHelper.displayName(role, t).toLowerCase();
   let accessNote;
   switch (role) {
     case UserRole.Admin:
       accessNote = t("Admins can manage the workspace and access billing.");
       break;
     case UserRole.Member:
-      accessNote = t("Editors can create, edit, and comment on documents.");
+      accessNote = t("Members can create, edit, and comment on documents.");
       break;
     case UserRole.Viewer:
       accessNote = t(
@@ -61,11 +63,11 @@ export function UserChangeRoleDialog({
     <ConfirmationDialog onSubmit={handleSubmit} savingText={`${t("Saving")}…`}>
       {users.length === 1
         ? t("Are you sure you want to make {{ userName }} a {{ role }}?", {
-            role,
+            role: roleName,
             userName: users[0].name,
           })
         : t("Are you sure you want to make {{ count }} user a {{ role }}?", {
-            role,
+            role: roleName,
             count: users.length,
           })}{" "}
       {accessNote}
