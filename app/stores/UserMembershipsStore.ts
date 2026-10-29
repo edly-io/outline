@@ -49,11 +49,20 @@ export default class UserMembershipsStore extends IndexedStore<UserMembership> {
     ]);
 
   @override
-  async create({ documentId, userId, permission }: Partial<UserMembership>) {
+  async create({
+    documentId,
+    userId,
+    permission,
+    includeChildDocuments,
+  }: Partial<UserMembership> & {
+    /** Also share the current child documents, only applies to viewers. */
+    includeChildDocuments?: boolean;
+  }) {
     const res = await client.post("/documents.add_user", {
       id: documentId,
       userId,
       permission,
+      includeChildDocuments,
     });
 
     return runInAction(() => {

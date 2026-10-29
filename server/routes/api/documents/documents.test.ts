@@ -9810,3 +9810,117 @@ describe("viewer isolation", () => {
     expect(body.data).toEqual([]);
   });
 });
+
+describe("viewer sharing with nested documents", () => {
+  const setup = async () => {
+    const admin = await buildAdmin();
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const build = (title: string, parentDocumentId?: string) =>
+      buildDocument({
+        title,
+        teamId: admin.teamId,
+        userId: admin.id,
+        collectionId: collection.id,
+        parentDocumentId,
+      });
+    const parent = await build("Nested parent");
+    const shared = await build("Nested shared", parent.id);
+    const child = await build("Nested child", shared.id);
+    const grandchild = await build("Nested grandchild", child.id);
+    const sibling = await build("Nested sibling", parent.id);
+    return { admin, viewer, parent, shared, child, grandchild, sibling };
+  };
+
+  it("should share current nested documents when requested", async () => {
+    const { admin, viewer, parent, shared, child, grandchild, sibling } =
+      await setup();
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.memberships.map((m: { documentId: string }) => m.documentId)
+    ).toEqual(expect.arrayContaining([shared.id, child.id, grandchild.id]));
+
+    const read = async (id: string) =>
+      (await server.post("/api/documents.info", viewer, { body: { id } }))
+        .status;
+    expect(await read(shared.id)).toEqual(200);
+    expect(await read(child.id)).toEqual(200);
+    expect(await read(grandchild.id)).toEqual(200);
+    expect(await read(parent.id)).toEqual(403);
+    expect(await read(sibling.id)).toEqual(403);
+  });
+
+  it("should not share nested documents added later", async () => {
+    const { admin, viewer, shared } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    const later = await buildDocument({
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: shared.collectionId,
+      parentDocumentId: shared.id,
+    });
+    const res = await server.post("/api/documents.info", viewer, {
+      body: { id: later.id },
+    });
+    expect(res.status).toEqual(403);
+  });
+
+  it("should only include shared nested documents in the tree", async () => {
+    const { admin, viewer, shared, child, grandchild } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    await buildDocument({
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: shared.collectionId,
+      parentDocumentId: shared.id,
+    });
+    const res = await server.post("/api/documents.documents", viewer, {
+      body: { id: shared.id },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.children.map((n: { id: string }) => n.id)).toEqual([
+      child.id,
+    ]);
+    expect(body.data.children[0].children[0].id).toEqual(grandchild.id);
+  });
+
+  it("should list only the top shared document in shared with me", async () => {
+    const { admin, viewer, shared } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    const res = await server.post("/api/userMemberships.list", viewer);
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.memberships.map((m: { documentId: string }) => m.documentId)
+    ).toEqual([shared.id]);
+  });
+
+  it("should ignore the option for members", async () => {
+    const { admin, shared, child } = await setup();
+    const member = await buildUser({ teamId: admin.teamId });
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: member.id, includeChildDocuments: true },
+    });
+    expect(res.status).toEqual(200);
+    expect(
+      await UserMembership.count({
+        where: { userId: member.id, documentId: child.id, sourceId: null },
+      })
+    ).toEqual(0);
+  });
+});
