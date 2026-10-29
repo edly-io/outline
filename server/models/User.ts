@@ -297,10 +297,24 @@ class User extends ParanoidModel<
   }
 
   /**
-   * Whether the user is a viewer.
+   * Whether the user is a viewer. Viewers are treated as external users (such
+   * as clients) and can only see documents that are shared with them directly.
    */
   get isViewer() {
     return this.role === UserRole.Viewer;
+  }
+
+  /**
+   * Whether the user's email is outside of the configured internal domains. Is
+   * always false when `INTERNAL_EMAIL_DOMAINS` is not set.
+   */
+  get isExternal() {
+    const domains = env.INTERNAL_EMAIL_DOMAINS;
+    if (!domains?.length) {
+      return false;
+    }
+    const domain = this.email?.split("@").pop()?.toLowerCase();
+    return !domain || !domains.some((d) => d.toLowerCase() === domain);
   }
 
   /**
@@ -496,6 +510,12 @@ class User extends ParanoidModel<
       findOptions.lock;
 
     const fetchCollectionIds = async () => {
+      // Viewers never get access through a collection, only through documents
+      // that are shared with them directly.
+      if (this.isViewer) {
+        return [];
+      }
+
       const collectionStubs = await Collection.findAll({
         attributes: ["id"],
         where: {
@@ -828,6 +848,29 @@ class User extends ParanoidModel<
       transaction: options.transaction,
     });
   };
+
+  // External users (such as clients) are limited to the Viewer role so that
+  // they can never see documents that were not shared with them directly.
+  @BeforeCreate
+  static restrictExternalUserRole(model: User) {
+    if (model.isExternal && model.role !== UserRole.Guest) {
+      model.role = UserRole.Viewer;
+    }
+  }
+
+  @BeforeUpdate
+  static checkExternalUserRole(model: User) {
+    if (
+      (model.changed("role") || model.changed("email")) &&
+      model.isExternal &&
+      model.role !== UserRole.Viewer &&
+      model.role !== UserRole.Guest
+    ) {
+      throw ValidationError(
+        "Users with an email outside of the internal domains can only be viewers"
+      );
+    }
+  }
 
   @BeforeCreate
   static setRandomJwtSecret = (model: User) => {

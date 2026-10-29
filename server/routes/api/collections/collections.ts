@@ -52,7 +52,7 @@ import { collectionIndexing } from "@server/utils/indexing";
 import { QueryHelper } from "@server/storage/QueryHelper";
 import pagination from "../middlewares/pagination";
 import * as T from "./schema";
-import { InvalidRequestError } from "@server/errors";
+import { InvalidRequestError, ValidationError } from "@server/errors";
 
 const router = new Router();
 
@@ -414,6 +414,12 @@ router.post(
     ]);
     authorize(actor, "manageUsers", collection);
     authorize(actor, "read", user);
+
+    if (user.isViewer) {
+      throw ValidationError(
+        "Viewers cannot be added to a collection, share individual documents with them instead"
+      );
+    }
 
     let membership = await UserMembership.findOne({
       where: {

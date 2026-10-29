@@ -247,7 +247,8 @@ router.post(
     // collection access check. Mirrors the prior behavior of pushing then
     // removing the legacy collectionId predicate.
     let collectionScopeDropped = false;
-    if (parentDocumentId) {
+    // Viewers do not get access to child documents through a parent document.
+    if (parentDocumentId && !user.isViewer) {
       const [groupMembership, membership] = await Promise.all([
         GroupMembership.findOne({
           where: { documentId: parentDocumentId },
@@ -613,7 +614,7 @@ router.post(
     const userId = user.id;
     const [collectionIds, membershipDocumentIds] = await Promise.all([
       user.collectionIds(),
-      Document.membershipDocumentIds(userId),
+      Document.membershipDocumentIds(userId, { directOnly: user.isViewer }),
     ]);
     const views = await View.findAll({
       where: {

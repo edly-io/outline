@@ -793,7 +793,9 @@ export default class PostgresSearchProvider extends BaseSearchProvider {
     // specified, otherwise to the team's publicly-permissioned set.
     if (model instanceof User) {
       const [membershipDocumentIds, collectionIds] = await Promise.all([
-        Document.membershipDocumentIds(model.id),
+        Document.membershipDocumentIds(model.id, {
+          directOnly: model.isViewer,
+        }),
         model.collectionIds(),
       ]);
       if (membershipDocumentIds.length) {

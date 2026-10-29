@@ -9696,3 +9696,109 @@ describe("#documents.documents", () => {
     expect(body).toMatchSnapshot();
   });
 });
+
+describe("viewer isolation", () => {
+  const setup = async () => {
+    const admin = await buildAdmin();
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const parent = await buildDocument({
+      title: "Isolation parent",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+    });
+    const shared = await buildDocument({
+      title: "Isolation shared",
+      text: "isolationkeyword",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+      parentDocumentId: parent.id,
+    });
+    const child = await buildDocument({
+      title: "Isolation child",
+      text: "isolationkeyword",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+      parentDocumentId: shared.id,
+    });
+    const sibling = await buildDocument({
+      title: "Isolation sibling",
+      text: "isolationkeyword",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+      parentDocumentId: parent.id,
+    });
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id },
+    });
+    expect(res.status).toEqual(200);
+    return { admin, viewer, collection, parent, shared, child, sibling };
+  };
+
+  it("should only allow reading the shared document", async () => {
+    const { viewer, parent, shared, child, sibling } = await setup();
+    const read = async (id: string) =>
+      (await server.post("/api/documents.info", viewer, { body: { id } }))
+        .status;
+    expect(await read(shared.id)).toEqual(200);
+    expect(await read(parent.id)).toEqual(403);
+    expect(await read(child.id)).toEqual(403);
+    expect(await read(sibling.id)).toEqual(403);
+  });
+
+  it("should not list related documents", async () => {
+    const { viewer, collection, parent, shared } = await setup();
+    const list = async (body: Record<string, unknown>) => {
+      const res = await server.post("/api/documents.list", viewer, { body });
+      return ((await res.json()).data ?? []).map(
+        (doc: { id: string }) => doc.id
+      );
+    };
+    expect(await list({})).toEqual([]);
+    expect(await list({ parentDocumentId: shared.id })).toEqual([]);
+    expect(await list({ parentDocumentId: parent.id })).toEqual([]);
+
+    const res = await server.post("/api/collections.documents", viewer, {
+      body: { id: collection.id },
+    });
+    expect(res.status).toEqual(403);
+  });
+
+  it("should only find the shared document in search", async () => {
+    const { viewer, shared } = await setup();
+    const res = await server.post("/api/documents.search", viewer, {
+      body: { query: "isolationkeyword" },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.map(
+        (result: { document: { id: string } }) => result.document.id
+      )
+    ).toEqual([shared.id]);
+  });
+
+  it("should not reveal backlinks from other documents", async () => {
+    const { admin, viewer, shared, sibling } = await setup();
+    await Relationship.create({
+      reverseDocumentId: sibling.id,
+      type: RelationshipType.Backlink,
+      documentId: shared.id,
+      userId: admin.id,
+    });
+    const res = await server.post("/api/documents.list", viewer, {
+      body: { backlinkDocumentId: shared.id },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data).toEqual([]);
+  });
+});

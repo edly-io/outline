@@ -60,8 +60,10 @@ allow(User, "move", Collection, (actor, collection) =>
   )
 );
 
+// Viewers are external users (such as clients) and never get access through a
+// collection, only through documents that are shared with them directly.
 allow(User, "read", Collection, (user, collection) => {
-  if (!collection || user.teamId !== collection.teamId) {
+  if (!collection || user.teamId !== collection.teamId || user.isViewer) {
     return false;
   }
   if (collection.isPersonal) {
@@ -111,7 +113,7 @@ allow(
   ["readDocument", "subscribe", "unsubscribe"],
   Collection,
   (user, collection) => {
-    if (!collection || user.teamId !== collection.teamId) {
+    if (!collection || user.teamId !== collection.teamId || user.isViewer) {
       return false;
     }
 
@@ -142,6 +144,7 @@ allow(User, "shareDocument", Collection, (user, collection) => {
   if (
     !collection ||
     user.isGuest ||
+    user.isViewer ||
     user.teamId !== collection.teamId ||
     !isTeamMutable(user)
   ) {
@@ -175,7 +178,8 @@ allow(User, "updateDocument", Collection, (user, collection) => {
     !collection ||
     !isTeamModel(user, collection) ||
     !isTeamMutable(user) ||
-    !isCollectionWritable(user, collection)
+    !isCollectionWritable(user, collection) ||
+    user.isViewer
   ) {
     return false;
   }
@@ -207,7 +211,8 @@ allow(
       !collection.isActive ||
       !isTeamModel(user, collection) ||
       !isTeamMutable(user) ||
-      !isCollectionWritable(user, collection)
+      !isCollectionWritable(user, collection) ||
+      user.isViewer
     ) {
       return false;
     }
@@ -240,6 +245,7 @@ allow(
       !!collection?.isActive,
       isTeamModel(user, collection),
       isTeamMutable(user),
+      !user.isViewer,
       // Templates in a personal collection would only be visible to its owner.
       !collection?.isPersonal,
       or(

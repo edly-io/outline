@@ -569,6 +569,12 @@ describe("#revisions.export", () => {
       teamId: team.id,
       userId: author.id,
     });
+    await UserMembership.create({
+      createdById: author.id,
+      documentId: document.id,
+      userId: viewer.id,
+      permission: DocumentPermission.Read,
+    });
     const revision = await Revision.createFromDocument(
       createContext({ user: author }),
       document
@@ -591,6 +597,12 @@ describe("#revisions.export", () => {
     const document = await buildDocument({
       teamId: team.id,
       userId: author.id,
+    });
+    await UserMembership.create({
+      createdById: author.id,
+      documentId: document.id,
+      userId: viewer.id,
+      permission: DocumentPermission.Read,
     });
     const revision = await Revision.createFromDocument(
       createContext({ user: author }),

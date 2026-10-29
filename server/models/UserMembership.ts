@@ -342,6 +342,16 @@ class UserMembership extends IdModel<
     }
     const { transaction, documentId } = options;
 
+    // Viewers only get access to the documents shared with them directly, so
+    // their memberships are never inherited by child documents.
+    const user = await User.findByPk(model.userId, {
+      attributes: ["id", "role"],
+      transaction,
+    });
+    if (user?.isViewer) {
+      return;
+    }
+
     const document = await Document.unscoped()
       .scope("withoutState")
       .findOne({

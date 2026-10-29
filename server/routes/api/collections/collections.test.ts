@@ -871,6 +871,27 @@ describe("#collections.export_all", () => {
 });
 
 describe("#collections.add_user", () => {
+  it("should not add a viewer to a collection", async () => {
+    const admin = await buildAdmin();
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      permission: null,
+    });
+    const res = await server.post("/api/collections.add_user", admin, {
+      body: {
+        id: collection.id,
+        userId: viewer.id,
+      },
+    });
+    expect(res.status).toEqual(400);
+    expect(
+      await UserMembership.count({
+        where: { collectionId: collection.id, userId: viewer.id },
+      })
+    ).toEqual(0);
+  });
+
   it("should add user to collection with manage permission", async () => {
     const user = await buildUser();
     const collection = await buildCollection({
@@ -2091,7 +2112,7 @@ describe("#collections.update", () => {
 
     it("should show the reason to readers", async () => {
       const owner = await buildUser();
-      const reader = await buildViewer({ teamId: owner.teamId });
+      const reader = await buildUser({ teamId: owner.teamId });
       const collection = await buildCollection({
         userId: owner.id,
         teamId: owner.teamId,

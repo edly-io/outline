@@ -2,6 +2,7 @@ import { faker } from "@faker-js/faker";
 import { errToString } from "@shared/utils/error";
 import { CollectionPermission, UserRole } from "@shared/types";
 import { createContext } from "@server/context";
+import env from "@server/env";
 import { Event } from "@server/models";
 import { sequelize } from "@server/storage/database";
 import {
@@ -469,5 +470,48 @@ describe("user model", () => {
       });
       expect(membership?.permission).toEqual(CollectionPermission.ReadWrite);
     });
+  });
+});
+
+describe("external users", () => {
+  beforeEach(() => {
+    env.INTERNAL_EMAIL_DOMAINS = ["example.com"];
+  });
+
+  afterEach(() => {
+    env.INTERNAL_EMAIL_DOMAINS = undefined;
+  });
+
+  it("should create users outside the internal domains as viewers", async () => {
+    const user = await buildUser({
+      email: "client@acme.test",
+      role: UserRole.Member,
+    });
+    expect(user.role).toEqual(UserRole.Viewer);
+  });
+
+  it("should keep the role of users in the internal domains", async () => {
+    const user = await buildUser({
+      email: "staff@example.com",
+      role: UserRole.Member,
+    });
+    expect(user.role).toEqual(UserRole.Member);
+  });
+
+  it("should not allow promoting users outside the internal domains", async () => {
+    const user = await buildUser({ email: "client@acme.test" });
+    user.role = UserRole.Member;
+    await expect(user.save()).rejects.toThrow(
+      "Users with an email outside of the internal domains can only be viewers"
+    );
+  });
+
+  it("should allow any role when no internal domains are set", async () => {
+    env.INTERNAL_EMAIL_DOMAINS = undefined;
+    const user = await buildUser({
+      email: "client@acme.test",
+      role: UserRole.Member,
+    });
+    expect(user.role).toEqual(UserRole.Member);
   });
 });

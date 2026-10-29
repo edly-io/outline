@@ -164,7 +164,7 @@ function Invite({ onSubmit }: Props) {
       {
         type: "item",
         label: t("Viewer"),
-        description: t("Can view and comment"),
+        description: t("External, only sees documents shared directly"),
         value: UserRole.Viewer,
       },
     ];

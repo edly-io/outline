@@ -30,15 +30,19 @@ allow(User, "createDocument", Team, (actor, document) =>
 allow(User, "read", Document, (actor, document) =>
   and(
     isTeamModel(actor, document),
-    or(
-      includesMembership(document, [
-        DocumentPermission.Read,
-        DocumentPermission.ReadWrite,
-        DocumentPermission.Admin,
-      ]),
-      and(!!document?.isDraft, actor.id === document?.createdById),
-      can(actor, "readDocument", document?.collection)
-    )
+    actor.isViewer
+      ? // Viewers are external users (such as clients) and only see documents
+        // shared with them directly, never their parents, siblings or children.
+        includesDirectMembership(actor, document)
+      : or(
+          includesMembership(document, [
+            DocumentPermission.Read,
+            DocumentPermission.ReadWrite,
+            DocumentPermission.Admin,
+          ]),
+          and(!!document?.isDraft, actor.id === document?.createdById),
+          can(actor, "readDocument", document?.collection)
+        )
   )
 );
 
@@ -365,4 +369,32 @@ function includesMembership(
   }
 
   return membershipIds.length > 0 ? membershipIds : false;
+}
+
+/**
+ * Check whether the document is shared with the user directly, which excludes
+ * group memberships and memberships inherited from a parent document.
+ *
+ * @param user The user to check.
+ * @param document The document to check.
+ * @returns True if the user has a direct membership on the document.
+ */
+function includesDirectMembership(user: User, document: Document | null) {
+  if (!document) {
+    return false;
+  }
+
+  invariant(
+    document.memberships,
+    "Development: document memberships should be preloaded, did you forget withMembership scope?"
+  );
+
+  return document.memberships.some(
+    (membership) =>
+      membership.userId === user.id &&
+      !membership.sourceId &&
+      Object.values(DocumentPermission).includes(
+        membership.permission as DocumentPermission
+      )
+  );
 }

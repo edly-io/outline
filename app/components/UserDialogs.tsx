@@ -51,7 +51,9 @@ export function UserChangeRoleDialog({
       accessNote = t("Editors can create, edit, and comment on documents.");
       break;
     case UserRole.Viewer:
-      accessNote = t("Viewers can only view and comment on documents.");
+      accessNote = t(
+        "Viewers are external users and can only see documents shared with them directly."
+      );
       break;
   }
 
