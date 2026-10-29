@@ -9770,6 +9770,14 @@ describe("viewer isolation", () => {
       body: { id: collection.id },
     });
     expect(res.status).toEqual(403);
+
+    const tree = await server.post("/api/documents.documents", viewer, {
+      body: { id: shared.id },
+    });
+    const treeBody = await tree.json();
+    expect(tree.status).toEqual(200);
+    expect(treeBody.data.id).toEqual(shared.id);
+    expect(treeBody.data.children).toEqual([]);
   });
 
   it("should only find the shared document in search", async () => {

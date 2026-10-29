@@ -954,6 +954,11 @@ router.post(
       documentTree = collection?.getDocumentTree(document.id) ?? undefined;
     }
 
+    // Viewers only see the documents shared with them directly, not children.
+    if (documentTree && user.isViewer) {
+      documentTree = { ...documentTree, children: [] };
+    }
+
     ctx.body = {
       data: documentTree,
     };
