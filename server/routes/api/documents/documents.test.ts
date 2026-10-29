@@ -9910,6 +9910,28 @@ describe("viewer sharing with nested documents", () => {
     ).toEqual([shared.id]);
   });
 
+  it("should not copy viewer memberships to a newly published child", async () => {
+    const { admin, viewer, shared } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id },
+    });
+    const res = await server.post("/api/documents.create", admin, {
+      body: {
+        title: "Published later",
+        collectionId: shared.collectionId,
+        parentDocumentId: shared.id,
+        publish: true,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      await UserMembership.count({
+        where: { userId: viewer.id, documentId: body.data.id },
+      })
+    ).toEqual(0);
+  });
+
   it("should ignore the option for members", async () => {
     const { admin, shared, child } = await setup();
     const member = await buildUser({ teamId: admin.teamId });

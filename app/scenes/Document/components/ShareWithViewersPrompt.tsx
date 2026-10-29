@@ -75,8 +75,12 @@ function ShareWithViewersPrompt({ document }: Props) {
         return;
       }
 
+      // Inherited memberships do not give viewers access, so only direct
+      // memberships count as already shared.
       const alreadyShared = new Set(
-        current.data.memberships.map((membership) => membership.userId)
+        current.data.memberships
+          .filter((membership) => !membership.sourceId)
+          .map((membership) => membership.userId)
       );
       const viewers: Viewer[] = parent.data.memberships.flatMap(
         (membership) => {

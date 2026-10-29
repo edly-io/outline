@@ -148,23 +148,26 @@ class UserMembership extends IdModel<
     options: SaveOptions
   ) {
     const { transaction } = options;
-    const userMemberships = await this.findAll({
+    const userMemberships = await this.scope("withUser").findAll({
       where,
       transaction,
     });
     await Promise.all(
-      userMemberships.map((membership) =>
-        this.create(
-          {
-            documentId: document.id,
-            userId: membership.userId,
-            sourceId: membership.sourceId ?? membership.id,
-            permission: membership.permission,
-            createdById: membership.createdById,
-          },
-          { transaction, hooks: false }
+      userMemberships
+        // Viewers only get access to the documents shared with them directly.
+        .filter((membership) => !membership.user?.isViewer)
+        .map((membership) =>
+          this.create(
+            {
+              documentId: document.id,
+              userId: membership.userId,
+              sourceId: membership.sourceId ?? membership.id,
+              permission: membership.permission,
+              createdById: membership.createdById,
+            },
+            { transaction, hooks: false }
+          )
         )
-      )
     );
   }
 
