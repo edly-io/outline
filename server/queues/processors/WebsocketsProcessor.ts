@@ -961,7 +961,10 @@ export default class WebsocketsProcessor {
           .to(`user-${event.userId}`)
           .emit(event.name, presentUser(user, { includeDetails: true }));
 
-        socketio.to(`team-${user.teamId}`).emit(event.name, presentUser(user));
+        // Viewers cannot list users, so they are not sent other users' updates.
+        socketio
+          .to(`team-${user.teamId}.members`)
+          .emit(event.name, presentUser(user));
         return;
       }
 
@@ -982,7 +985,7 @@ export default class WebsocketsProcessor {
           skipCache: true,
         });
 
-        if (user.isGuest) {
+        if (user.isGuest || user.isViewer) {
           const teamCollections = await Collection.findAll({
             attributes: ["id"],
             where: { teamId: user.teamId },
@@ -993,9 +996,14 @@ export default class WebsocketsProcessor {
             .filter((id) => !accessibleCollectionIdsSet.has(id))
             .map((id) => `collection-${id}`);
 
+          // Viewers do not get access through groups either.
+          const groupRooms = user.isViewer
+            ? (await user.groupIds()).map((id) => `group-${id}`)
+            : [];
+
           return socketio
             .in(`user-${user.id}`)
-            .socketsLeave([membersRoom, ...inaccessibleRooms]);
+            .socketsLeave([membersRoom, ...inaccessibleRooms, ...groupRooms]);
         }
 
         return socketio
@@ -1115,7 +1123,8 @@ export default class WebsocketsProcessor {
         channels.push(`collection-${template.collectionId}`);
       }
     } else {
-      channels.push(`team-${template.teamId}`);
+      // Workspace templates are not visible to viewers or guests.
+      channels.push(`team-${template.teamId}.members`);
     }
 
     return uniq(channels);

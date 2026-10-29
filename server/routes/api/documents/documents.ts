@@ -1999,9 +1999,10 @@ router.post(
     });
 
     if (membership) {
-      if (permission) {
-        membership.permission = permission;
-        // disconnect from the source if the permission is manually updated
+      // Disconnect from the source if the permission is manually updated, or
+      // when sharing directly with a viewer, who never inherits access.
+      if (permission || (membership.sourceId && user.isViewer)) {
+        membership.permission = permission ?? membership.permission;
         membership.sourceId = null;
         await membership.save(ctx.context);
       }

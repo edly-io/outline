@@ -3,6 +3,7 @@ import { addHours, addMinutes, subMinutes } from "date-fns";
 import JWT from "jsonwebtoken";
 import type { Context } from "koa";
 import type {
+  CreateOptions,
   Transaction,
   SaveOptions,
   FindOptions,
@@ -306,15 +307,16 @@ class User extends ParanoidModel<
 
   /**
    * Whether the user's email is outside of the configured internal domains. Is
-   * always false when `INTERNAL_EMAIL_DOMAINS` is not set.
+   * always false when `INTERNAL_EMAIL_DOMAINS` is not set or the user has no
+   * email, as they cannot be classified.
    */
   get isExternal() {
     const domains = env.INTERNAL_EMAIL_DOMAINS;
-    if (!domains?.length) {
+    const domain = this.email?.split("@").pop()?.toLowerCase();
+    if (!domains?.length || !domain) {
       return false;
     }
-    const domain = this.email?.split("@").pop()?.toLowerCase();
-    return !domain || !domains.some((d) => d.toLowerCase() === domain);
+    return !domains.some((d) => d.toLowerCase() === domain);
   }
 
   /**
@@ -850,25 +852,49 @@ class User extends ParanoidModel<
   };
 
   // External users (such as clients) are limited to the Viewer role so that
-  // they can never see documents that were not shared with them directly.
+  // they can never see documents that were not shared with them directly. The
+  // first user of a workspace keeps their role so the workspace has an admin.
   @BeforeCreate
-  static restrictExternalUserRole(model: User) {
-    if (model.isExternal && model.role !== UserRole.Guest) {
-      model.role = UserRole.Viewer;
+  static async restrictExternalUserRole(
+    model: User,
+    options: CreateOptions<InferAttributes<User>>
+  ) {
+    if (
+      !model.isExternal ||
+      model.role === UserRole.Viewer ||
+      model.role === UserRole.Guest
+    ) {
+      return;
     }
+    if (model.role === UserRole.Admin) {
+      const count = await this.count({
+        where: { teamId: model.teamId },
+        transaction: options.transaction,
+      });
+      if (count === 0) {
+        return;
+      }
+    }
+    model.role = UserRole.Viewer;
   }
 
   @BeforeUpdate
   static checkExternalUserRole(model: User) {
+    if (!model.isExternal) {
+      return;
+    }
     if (
-      (model.changed("role") || model.changed("email")) &&
-      model.isExternal &&
-      model.role !== UserRole.Viewer &&
-      model.role !== UserRole.Guest
+      model.changed("role") &&
+      (model.role === UserRole.Member || model.role === UserRole.Admin)
     ) {
       throw ValidationError(
         "Users with an email outside of the internal domains can only be viewers"
       );
+    }
+    // An email that changes to an external domain, for example when signing
+    // in, demotes a member rather than failing.
+    if (model.changed("email") && model.role === UserRole.Member) {
+      model.role = UserRole.Viewer;
     }
   }
 
@@ -938,6 +964,55 @@ class User extends ParanoidModel<
           },
         }
       );
+    }
+  }
+
+  // Viewers never inherit access to documents from a parent document, so their
+  // inherited memberships are removed when they become a viewer, and recreated
+  // from their direct memberships when they are no longer a viewer.
+  @AfterUpdate
+  static async updateSourcedMembershipsAfterRoleChange(
+    model: User,
+    options: InstanceUpdateOptions<InferAttributes<User>>
+  ) {
+    if (!model.changed("role")) {
+      return;
+    }
+    const { transaction } = options;
+    const wasViewer = model.previous("role") === UserRole.Viewer;
+
+    if (model.isViewer && !wasViewer) {
+      await UserMembership.destroy({
+        where: { userId: model.id, sourceId: { [Op.ne]: null } },
+        transaction,
+      });
+    } else if (wasViewer && !model.isViewer) {
+      const memberships = await UserMembership.findAll({
+        where: {
+          userId: model.id,
+          documentId: { [Op.ne]: null },
+          sourceId: { [Op.is]: null },
+        },
+        transaction,
+      });
+      for (const membership of memberships) {
+        await UserMembership.recreateSourcedMemberships(membership, {
+          transaction,
+        });
+      }
+    } else {
+      return;
+    }
+
+    const invalidate = () =>
+      CacheHelper.removeData(
+        RedisPrefixHelper.getUserMembershipDocumentIdsKey(model.id)
+      );
+
+    if (transaction) {
+      (transaction.parent || transaction).afterCommit(invalidate);
+    } else {
+      await invalidate();
     }
   }
 

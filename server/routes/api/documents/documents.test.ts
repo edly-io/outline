@@ -9932,6 +9932,34 @@ describe("viewer sharing with nested documents", () => {
     ).toEqual(0);
   });
 
+  it("should turn an inherited viewer membership into a direct share", async () => {
+    const { admin, viewer, shared, child } = await setup();
+    const source = await UserMembership.create({
+      createdById: admin.id,
+      documentId: shared.id,
+      userId: viewer.id,
+      permission: DocumentPermission.Read,
+    });
+    await UserMembership.create(
+      {
+        createdById: admin.id,
+        documentId: child.id,
+        userId: viewer.id,
+        permission: DocumentPermission.Read,
+        sourceId: source.id,
+      },
+      { hooks: false }
+    );
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: child.id, userId: viewer.id },
+    });
+    expect(res.status).toEqual(200);
+    const info = await server.post("/api/documents.info", viewer, {
+      body: { id: child.id },
+    });
+    expect(info.status).toEqual(200);
+  });
+
   it("should ignore the option for members", async () => {
     const { admin, shared, child } = await setup();
     const member = await buildUser({ teamId: admin.teamId });

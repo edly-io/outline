@@ -1,6 +1,10 @@
 import { faker } from "@faker-js/faker";
 import { errToString } from "@shared/utils/error";
-import { CollectionPermission, UserRole } from "@shared/types";
+import {
+  CollectionPermission,
+  DocumentPermission,
+  UserRole,
+} from "@shared/types";
 import { createContext } from "@server/context";
 import env from "@server/env";
 import { Event } from "@server/models";
@@ -12,6 +16,7 @@ import {
   buildAdmin,
   buildViewer,
   buildGuestUser,
+  buildDocument,
 } from "@server/test/factories";
 import User from "./User";
 import UserMembership from "./UserMembership";
@@ -506,6 +511,44 @@ describe("external users", () => {
     );
   });
 
+  it("should keep the first admin of a new workspace", async () => {
+    const team = await buildTeam();
+    await User.destroy({ where: { teamId: team.id }, force: true });
+    const user = await User.create({
+      name: "Founder",
+      email: "founder@gmail.test",
+      teamId: team.id,
+      role: UserRole.Admin,
+    });
+    expect(user.role).toEqual(UserRole.Admin);
+  });
+
+  it("should create invited admins outside the internal domains as viewers", async () => {
+    const admin = await buildAdmin({ email: "staff@example.com" });
+    const user = await buildUser({
+      teamId: admin.teamId,
+      email: "client@acme.test",
+      role: UserRole.Admin,
+    });
+    expect(user.role).toEqual(UserRole.Viewer);
+  });
+
+  it("should demote a member whose email changes to an external domain", async () => {
+    const user = await buildUser({
+      email: "staff@example.com",
+      role: UserRole.Member,
+    });
+    await user.update({ email: "someone@acme.test" });
+    await user.reload();
+    expect(user.role).toEqual(UserRole.Viewer);
+  });
+
+  it("should not treat users without an email as external", async () => {
+    const user = await buildUser({ email: "staff@example.com" });
+    user.email = null;
+    expect(user.isExternal).toEqual(false);
+  });
+
   it("should allow any role when no internal domains are set", async () => {
     env.INTERNAL_EMAIL_DOMAINS = undefined;
     const user = await buildUser({
@@ -513,5 +556,42 @@ describe("external users", () => {
       role: UserRole.Member,
     });
     expect(user.role).toEqual(UserRole.Member);
+  });
+});
+
+describe("role changes to and from viewer", () => {
+  it("should remove and recreate inherited document memberships", async () => {
+    const admin = await buildAdmin();
+    const user = await buildUser({ teamId: admin.teamId });
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      permission: null,
+    });
+    const parent = await buildDocument({
+      teamId: admin.teamId,
+      collectionId: collection.id,
+    });
+    const child = await buildDocument({
+      teamId: admin.teamId,
+      collectionId: collection.id,
+      parentDocumentId: parent.id,
+    });
+    await UserMembership.create({
+      createdById: admin.id,
+      documentId: parent.id,
+      userId: user.id,
+      permission: DocumentPermission.Read,
+    });
+    const countInherited = () =>
+      UserMembership.count({
+        where: { userId: user.id, documentId: child.id },
+      });
+    expect(await countInherited()).toEqual(1);
+
+    await user.update({ role: UserRole.Viewer });
+    expect(await countInherited()).toEqual(0);
+
+    await user.update({ role: UserRole.Member });
+    expect(await countInherited()).toEqual(1);
   });
 });

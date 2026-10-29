@@ -187,8 +187,9 @@ async function authenticated(
   const rooms = [`team-${user.teamId}`, `user-${user.id}`];
 
   // the room of non-guest team members, who have access to all
-  // team-visible collections.
-  if (!user.isGuest) {
+  // team-visible collections. Viewers are external users and only receive
+  // events for documents shared with them directly.
+  if (!user.isGuest && !user.isViewer) {
     rooms.push(`team-${user.teamId}.members`);
   }
 
@@ -196,7 +197,7 @@ async function authenticated(
   // has access to on connection.
   const [collectionIds, groupIds] = await Promise.all([
     user.collectionIds(),
-    user.groupIds(),
+    user.isViewer ? [] : user.groupIds(),
   ]);
 
   collectionIds.forEach((colId) => rooms.push(`collection-${colId}`));
