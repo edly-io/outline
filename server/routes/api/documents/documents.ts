@@ -80,7 +80,7 @@ import { ProsemirrorHelper } from "@server/models/helpers/ProsemirrorHelper";
 import TextBundleHelper from "@server/models/helpers/TextBundleHelper";
 import SearchProviderManager from "@server/utils/SearchProviderManager";
 import { TextHelper } from "@server/models/helpers/TextHelper";
-import { authorize, cannot } from "@server/policies";
+import { authorize, can, cannot } from "@server/policies";
 import {
   presentDocument,
   presentDocumentInsight,
@@ -247,7 +247,8 @@ router.post(
     // collection access check. Mirrors the prior behavior of pushing then
     // removing the legacy collectionId predicate.
     let collectionScopeDropped = false;
-    if (parentDocumentId) {
+    // Viewers do not get access to child documents through a parent document.
+    if (parentDocumentId && !user.isViewer) {
       const [groupMembership, membership] = await Promise.all([
         GroupMembership.findOne({
           where: { documentId: parentDocumentId },
@@ -613,7 +614,7 @@ router.post(
     const userId = user.id;
     const [collectionIds, membershipDocumentIds] = await Promise.all([
       user.collectionIds(),
-      Document.membershipDocumentIds(userId),
+      Document.membershipDocumentIds(userId, { directOnly: user.isViewer }),
     ]);
     const views = await View.findAll({
       where: {
@@ -951,6 +952,21 @@ router.post(
         includeDocumentStructure: true,
       });
       documentTree = collection?.getDocumentTree(document.id) ?? undefined;
+    }
+
+    // Viewers only see the documents shared with them directly, so the tree is
+    // pruned to child documents that are also shared with them.
+    if (documentTree && user.isViewer) {
+      const sharedIds = new Set(
+        await Document.membershipDocumentIds(user.id, { directOnly: true })
+      );
+      const prune = (node: NavigationNode): NavigationNode => ({
+        ...node,
+        children: node.children
+          .filter((child) => sharedIds.has(child.id))
+          .map(prune),
+      });
+      documentTree = prune(documentTree);
     }
 
     ctx.body = {
@@ -1931,7 +1947,7 @@ router.post(
   async (ctx: APIContext<T.DocumentsAddUserReq>) => {
     const { transaction } = ctx.state;
     const { user: actor } = ctx.state.auth;
-    const { id, userId, permission } = ctx.input.body;
+    const { id, userId, permission, includeChildDocuments } = ctx.input.body;
 
     if (userId === actor.id) {
       throw ValidationError("You cannot invite yourself");
@@ -1983,9 +1999,10 @@ router.post(
     });
 
     if (membership) {
-      if (permission) {
-        membership.permission = permission;
-        // disconnect from the source if the permission is manually updated
+      // Disconnect from the source if the permission is manually updated, or
+      // when sharing directly with a viewer, who never inherits access.
+      if (permission || (membership.sourceId && user.isViewer)) {
+        membership.permission = permission ?? membership.permission;
         membership.sourceId = null;
         await membership.save(ctx.context);
       }
@@ -2002,10 +2019,56 @@ router.post(
       );
     }
 
+    const memberships = [membership];
+
+    // Viewers do not inherit access to child documents, so share each of the
+    // current child documents with them directly. Child documents added later
+    // must be shared separately.
+    if (includeChildDocuments && user.isViewer) {
+      const childDocumentIds = await document.findAllChildDocumentIds(
+        { publishedAt: { [Op.ne]: null } },
+        { transaction }
+      );
+      const childDocuments = await Document.findByIds(childDocumentIds, {
+        userId: actor.id,
+        includeViews: false,
+        transaction,
+      });
+
+      for (const child of childDocuments) {
+        if (!can(actor, "manageUsers", child)) {
+          continue;
+        }
+
+        let childMembership = await UserMembership.findOne({
+          where: { documentId: child.id, userId },
+          lock: transaction.LOCK.UPDATE,
+          ...ctx.context,
+        });
+
+        if (childMembership) {
+          childMembership.permission = membership.permission;
+          childMembership.sourceId = null;
+          await childMembership.save(ctx.context);
+        } else {
+          childMembership = await UserMembership.create(
+            {
+              documentId: child.id,
+              userId,
+              permission: membership.permission,
+              createdById: actor.id,
+            },
+            ctx.context
+          );
+        }
+        memberships.push(childMembership);
+      }
+    }
+
     ctx.body = {
       data: {
         users: [presentUser(user)],
-        memberships: [presentMembership(membership)],
+        memberships: memberships.map(presentMembership),
       },
     };
   }

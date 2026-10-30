@@ -9696,3 +9696,281 @@ describe("#documents.documents", () => {
     expect(body).toMatchSnapshot();
   });
 });
+
+describe("viewer isolation", () => {
+  const setup = async () => {
+    const admin = await buildAdmin();
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const parent = await buildDocument({
+      title: "Isolation parent",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+    });
+    const shared = await buildDocument({
+      title: "Isolation shared",
+      text: "isolationkeyword",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+      parentDocumentId: parent.id,
+    });
+    const child = await buildDocument({
+      title: "Isolation child",
+      text: "isolationkeyword",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+      parentDocumentId: shared.id,
+    });
+    const sibling = await buildDocument({
+      title: "Isolation sibling",
+      text: "isolationkeyword",
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: collection.id,
+      parentDocumentId: parent.id,
+    });
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id },
+    });
+    expect(res.status).toEqual(200);
+    return { admin, viewer, collection, parent, shared, child, sibling };
+  };
+
+  it("should only allow reading the shared document", async () => {
+    const { viewer, parent, shared, child, sibling } = await setup();
+    const read = async (id: string) =>
+      (await server.post("/api/documents.info", viewer, { body: { id } }))
+        .status;
+    expect(await read(shared.id)).toEqual(200);
+    expect(await read(parent.id)).toEqual(403);
+    expect(await read(child.id)).toEqual(403);
+    expect(await read(sibling.id)).toEqual(403);
+  });
+
+  it("should not list related documents", async () => {
+    const { viewer, collection, parent, shared } = await setup();
+    const list = async (body: Record<string, unknown>) => {
+      const res = await server.post("/api/documents.list", viewer, { body });
+      return ((await res.json()).data ?? []).map(
+        (doc: { id: string }) => doc.id
+      );
+    };
+    expect(await list({})).toEqual([]);
+    expect(await list({ parentDocumentId: shared.id })).toEqual([]);
+    expect(await list({ parentDocumentId: parent.id })).toEqual([]);
+
+    const res = await server.post("/api/collections.documents", viewer, {
+      body: { id: collection.id },
+    });
+    expect(res.status).toEqual(403);
+
+    const tree = await server.post("/api/documents.documents", viewer, {
+      body: { id: shared.id },
+    });
+    const treeBody = await tree.json();
+    expect(tree.status).toEqual(200);
+    expect(treeBody.data.id).toEqual(shared.id);
+    expect(treeBody.data.children).toEqual([]);
+  });
+
+  it("should only find the shared document in search", async () => {
+    const { viewer, shared } = await setup();
+    const res = await server.post("/api/documents.search", viewer, {
+      body: { query: "isolationkeyword" },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.map(
+        (result: { document: { id: string } }) => result.document.id
+      )
+    ).toEqual([shared.id]);
+  });
+
+  it("should not reveal backlinks from other documents", async () => {
+    const { admin, viewer, shared, sibling } = await setup();
+    await Relationship.create({
+      reverseDocumentId: sibling.id,
+      type: RelationshipType.Backlink,
+      documentId: shared.id,
+      userId: admin.id,
+    });
+    const res = await server.post("/api/documents.list", viewer, {
+      body: { backlinkDocumentId: shared.id },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data).toEqual([]);
+  });
+});
+
+describe("viewer sharing with nested documents", () => {
+  const setup = async () => {
+    const admin = await buildAdmin();
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const build = (title: string, parentDocumentId?: string) =>
+      buildDocument({
+        title,
+        teamId: admin.teamId,
+        userId: admin.id,
+        collectionId: collection.id,
+        parentDocumentId,
+      });
+    const parent = await build("Nested parent");
+    const shared = await build("Nested shared", parent.id);
+    const child = await build("Nested child", shared.id);
+    const grandchild = await build("Nested grandchild", child.id);
+    const sibling = await build("Nested sibling", parent.id);
+    return { admin, viewer, parent, shared, child, grandchild, sibling };
+  };
+
+  it("should share current nested documents when requested", async () => {
+    const { admin, viewer, parent, shared, child, grandchild, sibling } =
+      await setup();
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.memberships.map((m: { documentId: string }) => m.documentId)
+    ).toEqual(expect.arrayContaining([shared.id, child.id, grandchild.id]));
+
+    const read = async (id: string) =>
+      (await server.post("/api/documents.info", viewer, { body: { id } }))
+        .status;
+    expect(await read(shared.id)).toEqual(200);
+    expect(await read(child.id)).toEqual(200);
+    expect(await read(grandchild.id)).toEqual(200);
+    expect(await read(parent.id)).toEqual(403);
+    expect(await read(sibling.id)).toEqual(403);
+  });
+
+  it("should not share nested documents added later", async () => {
+    const { admin, viewer, shared } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    const later = await buildDocument({
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: shared.collectionId,
+      parentDocumentId: shared.id,
+    });
+    const res = await server.post("/api/documents.info", viewer, {
+      body: { id: later.id },
+    });
+    expect(res.status).toEqual(403);
+  });
+
+  it("should only include shared nested documents in the tree", async () => {
+    const { admin, viewer, shared, child, grandchild } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    await buildDocument({
+      teamId: admin.teamId,
+      userId: admin.id,
+      collectionId: shared.collectionId,
+      parentDocumentId: shared.id,
+    });
+    const res = await server.post("/api/documents.documents", viewer, {
+      body: { id: shared.id },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.children.map((n: { id: string }) => n.id)).toEqual([
+      child.id,
+    ]);
+    expect(body.data.children[0].children[0].id).toEqual(grandchild.id);
+  });
+
+  it("should list only the top shared document in shared with me", async () => {
+    const { admin, viewer, shared } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id, includeChildDocuments: true },
+    });
+    const res = await server.post("/api/userMemberships.list", viewer);
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.memberships.map((m: { documentId: string }) => m.documentId)
+    ).toEqual([shared.id]);
+  });
+
+  it("should not copy viewer memberships to a newly published child", async () => {
+    const { admin, viewer, shared } = await setup();
+    await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: viewer.id },
+    });
+    const res = await server.post("/api/documents.create", admin, {
+      body: {
+        title: "Published later",
+        collectionId: shared.collectionId,
+        parentDocumentId: shared.id,
+        publish: true,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(
+      await UserMembership.count({
+        where: { userId: viewer.id, documentId: body.data.id },
+      })
+    ).toEqual(0);
+  });
+
+  it("should turn an inherited viewer membership into a direct share", async () => {
+    const { admin, viewer, shared, child } = await setup();
+    const source = await UserMembership.create({
+      createdById: admin.id,
+      documentId: shared.id,
+      userId: viewer.id,
+      permission: DocumentPermission.Read,
+    });
+    await UserMembership.create(
+      {
+        createdById: admin.id,
+        documentId: child.id,
+        userId: viewer.id,
+        permission: DocumentPermission.Read,
+        sourceId: source.id,
+      },
+      { hooks: false }
+    );
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: child.id, userId: viewer.id },
+    });
+    expect(res.status).toEqual(200);
+    const info = await server.post("/api/documents.info", viewer, {
+      body: { id: child.id },
+    });
+    expect(info.status).toEqual(200);
+  });
+
+  it("should ignore the option for members", async () => {
+    const { admin, shared, child } = await setup();
+    const member = await buildUser({ teamId: admin.teamId });
+    const res = await server.post("/api/documents.add_user", admin, {
+      body: { id: shared.id, userId: member.id, includeChildDocuments: true },
+    });
+    expect(res.status).toEqual(200);
+    expect(
+      await UserMembership.count({
+        where: { userId: member.id, documentId: child.id, sourceId: null },
+      })
+    ).toEqual(0);
+  });
+});

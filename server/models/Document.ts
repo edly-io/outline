@@ -817,12 +817,14 @@ class Document extends ArchivableModel<
    * resolved on every search request.
    *
    * @param userId The user ID to find document memberships for.
-   * @param options Set `skipCache` to always read through to the database.
+   * @param options Set `skipCache` to always read through to the database, set
+   * `directOnly` to only include documents shared with the user directly, which
+   * excludes group memberships and memberships inherited from a parent document.
    * @returns A promise resolving to an array of document IDs.
    */
   static async membershipDocumentIds(
     userId: string,
-    options: { skipCache?: boolean } = {}
+    options: { skipCache?: boolean; directOnly?: boolean } = {}
   ): Promise<string[]> {
     const fetchDocumentIds = async () => {
       const [memberships, groupMemberships] = await Promise.all([
@@ -833,35 +835,38 @@ class Document extends ArchivableModel<
             documentId: {
               [Op.ne]: null,
             },
+            ...(options.directOnly && { sourceId: null }),
           },
         }),
-        GroupMembership.findAll({
-          attributes: ["documentId"],
-          where: {
-            documentId: {
-              [Op.ne]: null,
-            },
-          },
-          include: [
-            {
-              model: Group,
-              as: "group",
-              attributes: [],
-              required: true,
+        options.directOnly
+          ? []
+          : GroupMembership.findAll({
+              attributes: ["documentId"],
+              where: {
+                documentId: {
+                  [Op.ne]: null,
+                },
+              },
               include: [
                 {
-                  model: GroupUser,
-                  as: "groupUsers",
+                  model: Group,
+                  as: "group",
                   attributes: [],
                   required: true,
-                  where: {
-                    userId,
-                  },
+                  include: [
+                    {
+                      model: GroupUser,
+                      as: "groupUsers",
+                      attributes: [],
+                      required: true,
+                      where: {
+                        userId,
+                      },
+                    },
+                  ],
                 },
               ],
-            },
-          ],
-        }),
+            }),
       ]);
 
       return uniq(
@@ -871,7 +876,7 @@ class Document extends ArchivableModel<
       );
     };
 
-    if (options.skipCache) {
+    if (options.skipCache || options.directOnly) {
       return fetchDocumentIds();
     }
 
@@ -1047,6 +1052,13 @@ class Document extends ArchivableModel<
 
     if (!userId) {
       return documents;
+    }
+
+    // Viewers only see documents that are shared with them directly.
+    if (user?.isViewer) {
+      return documents.filter((doc) =>
+        doc.memberships.some((membership) => !membership.sourceId)
+      );
     }
 
     return documents.filter((doc) => {

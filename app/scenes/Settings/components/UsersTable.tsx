@@ -159,7 +159,7 @@ export function UsersTable({ canManage, ...rest }: Props) {
               ) : user.isGuest ? (
                 <Badge>{t("Guest")}</Badge>
               ) : (
-                <Badge>{t("Editor")}</Badge>
+                <Badge>{t("Member")}</Badge>
               )}
               {user.isSuspended && <Badge>{t("Suspended")}</Badge>}
             </HStack>

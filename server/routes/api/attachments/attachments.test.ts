@@ -1,6 +1,10 @@
 // @vitest-isolate true
 import { randomUUID } from "node:crypto";
-import { AttachmentPreset, CollectionPermission } from "@shared/types";
+import {
+  AttachmentPreset,
+  CollectionPermission,
+  DocumentPermission,
+} from "@shared/types";
 import env from "@server/env";
 import { UserMembership } from "@server/models";
 import Attachment from "@server/models/Attachment";
@@ -368,7 +372,7 @@ describe("#attachments.create", () => {
   });
 
   describe("viewer", () => {
-    it("should allow attachment creation for documents in collections with edit access", async () => {
+    it("should allow attachment creation for documents shared with edit access", async () => {
       const user = await buildViewer();
       const collection = await buildCollection({
         teamId: user.teamId,
@@ -381,9 +385,9 @@ describe("#attachments.create", () => {
 
       await UserMembership.create({
         createdById: user.id,
-        collectionId: collection.id,
+        documentId: document.id,
         userId: user.id,
-        permission: CollectionPermission.ReadWrite,
+        permission: DocumentPermission.ReadWrite,
       });
 
       const res = await server.post("/api/attachments.create", user, {

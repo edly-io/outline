@@ -24,6 +24,12 @@ router.post(
   async (ctx: APIContext<T.UserMembershipsListReq>) => {
     const { user } = ctx.state.auth;
 
+    // Child documents shared with a viewer are shown beneath their shared parent
+    // rather than as separate entries.
+    const sharedDocumentIds = user.isViewer
+      ? await Document.membershipDocumentIds(user.id, { directOnly: true })
+      : [];
+
     const memberships = await UserMembership.scope("withUser").findAll({
       where: {
         userId: user.id,
@@ -44,6 +50,12 @@ router.post(
             archivedAt: {
               [Op.eq]: null,
             },
+            ...(sharedDocumentIds.length && {
+              [Op.or]: [
+                { parentDocumentId: { [Op.is]: null } },
+                { parentDocumentId: { [Op.notIn]: sharedDocumentIds } },
+              ],
+            }),
           },
         },
       ],

@@ -30,15 +30,19 @@ allow(User, "createDocument", Team, (actor, document) =>
 allow(User, "read", Document, (actor, document) =>
   and(
     isTeamModel(actor, document),
-    or(
-      includesMembership(document, [
-        DocumentPermission.Read,
-        DocumentPermission.ReadWrite,
-        DocumentPermission.Admin,
-      ]),
-      and(!!document?.isDraft, actor.id === document?.createdById),
-      can(actor, "readDocument", document?.collection)
-    )
+    actor.isViewer
+      ? // Viewers are external users (such as clients) and only see documents
+        // shared with them directly, never their parents, siblings or children.
+        includesMembership(actor, document, Object.values(DocumentPermission))
+      : or(
+          includesMembership(actor, document, [
+            DocumentPermission.Read,
+            DocumentPermission.ReadWrite,
+            DocumentPermission.Admin,
+          ]),
+          and(!!document?.isDraft, actor.id === document?.createdById),
+          can(actor, "readDocument", document?.collection)
+        )
   )
 );
 
@@ -98,7 +102,7 @@ allow(User, "update", Document, (actor, document) =>
     can(actor, "read", document),
     isCollectionWritable(actor, document?.collection),
     or(
-      includesMembership(document, [
+      includesMembership(actor, document, [
         DocumentPermission.ReadWrite,
         DocumentPermission.Admin,
       ]),
@@ -120,10 +124,12 @@ allow(User, "publish", Document, (actor, document) =>
 
 allow(User, "manageUsers", Document, (actor, document) =>
   and(
+    // Viewers are external users and cannot share documents further.
+    !actor.isViewer,
     isTeamMutable(actor),
     can(actor, "read", document),
     or(
-      includesMembership(document, [DocumentPermission.Admin]),
+      includesMembership(actor, document, [DocumentPermission.Admin]),
       isTeamAdmin(actor, document),
       can(actor, "update", document?.collection),
       !!document?.isDraft && actor.id === document?.createdById
@@ -136,6 +142,7 @@ allow(User, "manageUsers", Document, (actor, document) =>
 allow(User, "duplicate", Document, (actor, document) =>
   and(
     !!document?.isActive,
+    !actor.isViewer,
     isTeamMutable(actor),
     can(actor, "read", document),
     or(
@@ -151,9 +158,10 @@ allow(User, "duplicate", Document, (actor, document) =>
 allow(User, "move", Document, (actor, document) =>
   or(
     and(
+      !actor.isViewer,
       can(actor, "update", document),
       or(
-        includesMembership(document, [
+        includesMembership(actor, document, [
           DocumentPermission.ReadWrite,
           DocumentPermission.Admin,
         ]),
@@ -168,8 +176,10 @@ allow(User, "move", Document, (actor, document) =>
 
 allow(User, "createChildDocument", Document, (actor, document) =>
   and(
-    //
     !document?.isDraft,
+    // Viewers only see documents shared with them, so they could not read a
+    // nested document they created.
+    !actor.isViewer,
     can(actor, "update", document)
   )
 );
@@ -198,6 +208,7 @@ allow(User, "pinToHome", Document, (actor, document) =>
 allow(User, "delete", Document, (actor, document) =>
   and(
     !document?.isDeleted,
+    !actor.isViewer,
     isTeamModel(actor, document),
     isTeamMutable(actor),
     or(
@@ -216,7 +227,7 @@ allow(User, "restore", Document, (actor, document) =>
     !!document?.isDeleted,
     isTeamModel(actor, document),
     or(
-      includesMembership(document, [
+      includesMembership(actor, document, [
         DocumentPermission.ReadWrite,
         DocumentPermission.Admin,
       ]),
@@ -243,11 +254,12 @@ allow(User, "archive", Document, (actor, document) =>
   and(
     !document?.isDraft,
     !!document?.isActive,
+    !actor.isViewer,
     or(
       and(
         can(actor, "update", document),
         or(
-          includesMembership(document, [DocumentPermission.Admin]),
+          includesMembership(actor, document, [DocumentPermission.Admin]),
           and(isTeamAdmin(actor, document), can(actor, "read", document)),
           can(actor, "updateDocument", document?.collection)
         )
@@ -266,7 +278,7 @@ allow(User, "unarchive", Document, (actor, document) =>
     !!document?.archivedAt,
     can(actor, "read", document),
     or(
-      includesMembership(document, [
+      includesMembership(actor, document, [
         DocumentPermission.ReadWrite,
         DocumentPermission.Admin,
       ]),
@@ -332,7 +344,18 @@ function isPersonalOwner(actor: User, document: Document | null) {
   );
 }
 
+/**
+ * Check whether the user has one of the given permissions on the document
+ * through a membership. Viewers are external users and only get access through
+ * direct user memberships, group and inherited memberships are ignored.
+ *
+ * @param actor The user to check.
+ * @param document The document to check.
+ * @param permissions The permissions to look for.
+ * @returns The matching membership ids, or false if there are none.
+ */
 function includesMembership(
+  actor: User,
   document: Document | null,
   permissions: DocumentPermission[]
 ) {
@@ -353,14 +376,22 @@ function includesMembership(
   const membershipIds: string[] = [];
 
   for (const membership of document.memberships) {
+    if (
+      actor.isViewer &&
+      (membership.userId !== actor.id || !!membership.sourceId)
+    ) {
+      continue;
+    }
     if (permissionSet.has(membership.permission as DocumentPermission)) {
       membershipIds.push(membership.id);
     }
   }
 
-  for (const membership of document.groupMemberships) {
-    if (permissionSet.has(membership.permission as DocumentPermission)) {
-      membershipIds.push(membership.id);
+  if (!actor.isViewer) {
+    for (const membership of document.groupMemberships) {
+      if (permissionSet.has(membership.permission as DocumentPermission)) {
+        membershipIds.push(membership.id);
+      }
     }
   }
 

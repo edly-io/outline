@@ -172,7 +172,7 @@ export const Suggestions = observer(function Suggestions({
         ? suggestion.email
         : suggestion.isViewer
           ? t("Viewer")
-          : t("Editor"),
+          : t("Member"),
       image: <Avatar model={suggestion} size={AvatarSize.Medium} />,
     };
   }

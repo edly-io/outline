@@ -37,6 +37,7 @@ import {
 import useDocumentSidebar from "../hooks/useDocumentSidebar";
 import Loading from "./Loading";
 import MarkAsViewed from "./MarkAsViewed";
+import ShareWithViewersPrompt from "./ShareWithViewersPrompt";
 
 type Params = {
   /** The document urlId + slugified title  */
@@ -318,6 +319,7 @@ function DataLoader({ match, children }: Props) {
         />
       )}
       {!revision && <MarkAsViewed document={document} />}
+      {!revision && <ShareWithViewersPrompt document={document} />}
       <React.Fragment key={canEdit ? "edit" : "read"}>
         {children({
           document,

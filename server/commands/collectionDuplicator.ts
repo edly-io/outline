@@ -1,6 +1,7 @@
 import { toError } from "@shared/utils/error";
 import Logger from "@server/logging/Logger";
 import { Collection } from "@server/models";
+import { can } from "@server/policies";
 import DuplicateCollectionDocumentsTask from "@server/queues/tasks/DuplicateCollectionDocumentsTask";
 import type { APIContext } from "@server/types";
 
@@ -27,6 +28,11 @@ export default async function collectionDuplicator(
   const { user } = ctx.state.auth;
   const { transaction } = ctx.state;
 
+  // Users that cannot create workspace-wide collections get a restricted copy.
+  const permission = can(user, "createWorkspaceCollection", user.team)
+    ? collection.permission
+    : null;
+
   const duplicated = Collection.build({
     name: name ?? collection.name,
     content: collection.content,
@@ -35,7 +41,7 @@ export default async function collectionDuplicator(
     color: collection.color,
     teamId: user.teamId,
     createdById: user.id,
-    permission: collection.permission,
+    permission,
     sharing: collection.sharing,
     sort: collection.sort,
     commenting: collection.commenting,
