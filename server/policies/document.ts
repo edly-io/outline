@@ -5,7 +5,7 @@ import {
   TeamPreference,
 } from "@shared/types";
 import { Document, Revision, User, Team } from "@server/models";
-import { allow, cannot, can } from "./cancan";
+import { allow, can } from "./cancan";
 import {
   and,
   isCollectionOwner,
@@ -41,7 +41,18 @@ allow(User, "read", Document, (actor, document) =>
             DocumentPermission.Admin,
           ]),
           and(!!document?.isDraft, actor.id === document?.createdById),
-          can(actor, "readDocument", document?.collection)
+
+          // Admins can always read restricted documents, except in another
+          // user's personal collection which stays private to its owner.
+          and(
+            isTeamAdmin(actor, document),
+            !!document?.collection,
+            !document?.collection?.isPersonal
+          ),
+          and(
+            !document?.isPrivate,
+            can(actor, "readDocument", document?.collection)
+          )
         )
   )
 );
@@ -106,9 +117,10 @@ allow(User, "update", Document, (actor, document) =>
         DocumentPermission.ReadWrite,
         DocumentPermission.Admin,
       ]),
-      or(
-        can(actor, "updateDocument", document?.collection),
-        and(!!document?.isDraft && actor.id === document?.createdById)
+      and(!!document?.isDraft && actor.id === document?.createdById),
+      and(
+        !document?.isPrivate,
+        can(actor, "updateDocument", document?.collection)
       )
     )
   )
@@ -131,7 +143,7 @@ allow(User, "manageUsers", Document, (actor, document) =>
     or(
       includesMembership(actor, document, [DocumentPermission.Admin]),
       isTeamAdmin(actor, document),
-      can(actor, "update", document?.collection),
+      and(!document?.isPrivate, can(actor, "update", document?.collection)),
       !!document?.isDraft && actor.id === document?.createdById
     )
   )
@@ -165,7 +177,10 @@ allow(User, "move", Document, (actor, document) =>
           DocumentPermission.ReadWrite,
           DocumentPermission.Admin,
         ]),
-        can(actor, "updateDocument", document?.collection),
+        and(
+          !document?.isPrivate,
+          can(actor, "updateDocument", document?.collection)
+        ),
         and(!!document?.isDraft && actor.id === document?.createdById),
         and(!!document?.isDraft && !document?.collection)
       )
@@ -231,7 +246,10 @@ allow(User, "restore", Document, (actor, document) =>
         DocumentPermission.ReadWrite,
         DocumentPermission.Admin,
       ]),
-      can(actor, "updateDocument", document?.collection),
+      and(
+        !document?.isPrivate,
+        can(actor, "updateDocument", document?.collection)
+      ),
       and(!!document?.isDraft && actor.id === document?.createdById)
     )
   )
@@ -261,7 +279,10 @@ allow(User, "archive", Document, (actor, document) =>
         or(
           includesMembership(actor, document, [DocumentPermission.Admin]),
           and(isTeamAdmin(actor, document), can(actor, "read", document)),
-          can(actor, "updateDocument", document?.collection)
+          and(
+            !document?.isPrivate,
+            can(actor, "updateDocument", document?.collection)
+          )
         )
       ),
       isPersonalOwner(actor, document)
@@ -282,7 +303,10 @@ allow(User, "unarchive", Document, (actor, document) =>
         DocumentPermission.ReadWrite,
         DocumentPermission.Admin,
       ]),
-      can(actor, "updateDocument", document?.collection),
+      and(
+        !document?.isPrivate,
+        can(actor, "updateDocument", document?.collection)
+      ),
       and(!!document?.isDraft && actor.id === document?.createdById)
     )
   )
@@ -302,31 +326,30 @@ allow(User, "updateDeprecatedReason", Document, (actor, document) =>
   )
 );
 
-allow(User, "unpublish", Document, (user, document) => {
-  if (
-    !document ||
-    user.isGuest ||
-    user.isViewer ||
-    !document.isActive ||
-    document.isDraft
-  ) {
-    return false;
-  }
+allow(User, "unpublish", Document, (user, document) =>
+  and(
+    !!document,
+    !user.isGuest,
+    !user.isViewer,
+    !!document?.isActive,
+    !document?.isDraft,
+    user.teamId === document?.teamId,
 
-  invariant(
-    document.collection,
-    "collection is missing, did you forget to include in the query scope?"
-  );
-
-  // Documents in a personal collection are already private to the owner.
-  if (document.collection.isPersonal) {
-    return false;
-  }
-  if (cannot(user, "updateDocument", document.collection)) {
-    return false;
-  }
-  return user.teamId === document.teamId;
-});
+    // Documents in a personal collection are already private to the owner.
+    !document?.collection?.isPersonal,
+    or(
+      includesMembership(user, document, [
+        DocumentPermission.ReadWrite,
+        DocumentPermission.Admin,
+      ]),
+      and(isTeamAdmin(user, document), can(user, "read", document)),
+      and(
+        !document?.isPrivate,
+        can(user, "updateDocument", document?.collection)
+      )
+    )
+  )
+);
 
 /**
  * Check if the actor owns the personal collection that the document is in. The
