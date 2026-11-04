@@ -1,10 +1,6 @@
 // @vitest-isolate true
 import { randomUUID } from "node:crypto";
-import {
-  AttachmentPreset,
-  CollectionPermission,
-  DocumentPermission,
-} from "@shared/types";
+import { AttachmentPreset, DocumentPermission } from "@shared/types";
 import env from "@server/env";
 import { UserMembership } from "@server/models";
 import Attachment from "@server/models/Attachment";
