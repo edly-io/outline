@@ -4,6 +4,7 @@ import {
   buildTeam,
   buildAdmin,
   buildViewer,
+  buildGuestUser,
 } from "@server/test/factories";
 import { serialize } from "./index";
 
@@ -266,6 +267,32 @@ describe("policies/user", () => {
 
       const abilities = serialize(user, team);
       expect(abilities.readEmail).toBeFalsy();
+    });
+  });
+
+  describe("listUsers", () => {
+    it("should allow members to list users", async () => {
+      const team = await buildTeam();
+      const user = await buildUser({ teamId: team.id });
+      expect(serialize(user, team).listUsers).toBeTruthy();
+    });
+
+    it("should allow admins to list users", async () => {
+      const team = await buildTeam();
+      const admin = await buildAdmin({ teamId: team.id });
+      expect(serialize(admin, team).listUsers).toBeTruthy();
+    });
+
+    it("should not allow viewers to list users", async () => {
+      const team = await buildTeam();
+      const viewer = await buildViewer({ teamId: team.id });
+      expect(serialize(viewer, team).listUsers).toEqual(false);
+    });
+
+    it("should not allow guests to list users", async () => {
+      const team = await buildTeam();
+      const guest = await buildGuestUser({ teamId: team.id });
+      expect(serialize(guest, team).listUsers).toEqual(false);
     });
   });
 });

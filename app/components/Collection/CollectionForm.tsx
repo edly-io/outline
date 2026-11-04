@@ -22,6 +22,7 @@ import Switch from "~/components/Switch";
 import Text from "~/components/Text";
 import useBoolean from "~/hooks/useBoolean";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
+import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import { EmptySelectValue } from "~/types";
 import { HStack } from "../primitives/HStack";
@@ -70,6 +71,7 @@ export const CollectionForm = observer(function CollectionForm_({
   collection?: Collection;
 }) {
   const team = useCurrentTeam();
+  const can = usePolicy(team);
   const { t } = useTranslation();
   const dialog = useDialogContext();
 
@@ -272,9 +274,16 @@ export const CollectionForm = observer(function CollectionForm_({
               ) => {
                 field.onChange(value === EmptySelectValue ? null : value);
               }}
-              help={t(
-                "The default access for workspace members. You can share with more users or groups later."
-              )}
+              disabled={!can.createWorkspaceCollection}
+              help={
+                can.createWorkspaceCollection
+                  ? t(
+                      "The default access for workspace members. You can share with more users or groups later."
+                    )
+                  : t(
+                      "Only admins can give all workspace members access. You can share with users or groups later."
+                    )
+              }
             />
           )}
         />

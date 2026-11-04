@@ -157,14 +157,14 @@ function Invite({ onSubmit }: Props) {
       ...memo,
       {
         type: "item",
-        label: t("Editor"),
+        label: t("Member"),
         description: t("Can create, edit, and delete documents"),
         value: UserRole.Member,
       },
       {
         type: "item",
         label: t("Viewer"),
-        description: t("Can view and comment"),
+        description: t("External, only sees documents shared directly"),
         value: UserRole.Viewer,
       },
     ];

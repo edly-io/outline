@@ -5,7 +5,12 @@ import {
   TeamPreference,
   UserRole,
 } from "@shared/types";
-import { Document, UserMembership } from "@server/models";
+import {
+  Document,
+  GroupMembership,
+  GroupUser,
+  UserMembership,
+} from "@server/models";
 import {
   buildUser,
   buildTeam,
@@ -14,6 +19,7 @@ import {
   buildCollection,
   buildAdmin,
   buildPersonalCollection,
+  buildGroup,
 } from "@server/test/factories";
 import { serialize } from "./index";
 
@@ -91,7 +97,7 @@ describe("read_write collection", () => {
     expect(abilities.manageUsers).toBeTruthy();
   });
 
-  it("should allow read permissions for viewer", async () => {
+  it("should not allow viewers to read through the collection", async () => {
     const team = await buildTeam();
     const user = await buildUser({
       teamId: team.id,
@@ -108,18 +114,9 @@ describe("read_write collection", () => {
     // reload to get membership
     const document = await Document.findByPk(doc.id, { userId: user.id });
     const abilities = serialize(user, document);
-    expect(abilities.read).toBeTruthy();
-    expect(abilities.download).toBeTruthy();
+    expect(abilities.read).toEqual(false);
     expect(abilities.update).toEqual(false);
-    expect(abilities.createChildDocument).toEqual(false);
-    expect(abilities.manageUsers).toEqual(false);
-    expect(abilities.archive).toEqual(false);
-    expect(abilities.delete).toEqual(false);
-    expect(abilities.share).toEqual(false);
-    expect(abilities.move).toEqual(false);
-    expect(abilities.subscribe).toBeTruthy();
-    expect(abilities.unsubscribe).toBeTruthy();
-    expect(abilities.comment).toBeTruthy();
+    expect(abilities.comment).toEqual(false);
   });
 
   it("should allow no permissions for guest", async () => {
@@ -579,8 +576,9 @@ describe("read document", () => {
 });
 
 describe("read_write document", () => {
+  // Viewers are covered separately below, they cannot restructure documents.
   const nonAdminRoles = Object.values(UserRole).filter(
-    (role) => role !== UserRole.Admin
+    (role) => role !== UserRole.Admin && role !== UserRole.Viewer
   );
   for (const role of nonAdminRoles) {
     it(`should allow write permissions for ${role}`, async () => {
@@ -780,7 +778,9 @@ describe("commenting access", () => {
 });
 
 describe("manage document", () => {
-  for (const role of Object.values(UserRole)) {
+  for (const role of Object.values(UserRole).filter(
+    (r) => r !== UserRole.Viewer
+  )) {
     it(`should allow write permissions, user management, and sub-document creation for ${role}`, async () => {
       const team = await buildTeam();
       team.setPreference(TeamPreference.Commenting, CommentingAccess.Everyone);
@@ -932,5 +932,175 @@ describe("personal collection", () => {
     expect(collaboratorAbilities.read).toBeTruthy();
     expect(collaboratorAbilities.update).toEqual(false);
     expect(collaboratorAbilities.move).toEqual(false);
+  });
+});
+
+describe("viewer", () => {
+  it("should allow reading a document shared directly", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({ teamId: team.id });
+    const user = await buildUser({ teamId: team.id, role: UserRole.Viewer });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const doc = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    await UserMembership.create({
+      createdById: admin.id,
+      documentId: doc.id,
+      userId: user.id,
+      permission: DocumentPermission.Read,
+    });
+    const document = await Document.findByPk(doc.id, { userId: user.id });
+    const abilities = serialize(user, document);
+    expect(abilities.read).toBeTruthy();
+    expect(abilities.comment).toBeTruthy();
+    expect(abilities.update).toEqual(false);
+    expect(abilities.share).toEqual(false);
+    expect(abilities.manageUsers).toEqual(false);
+  });
+
+  it("should not inherit access to child documents", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({ teamId: team.id });
+    const user = await buildUser({ teamId: team.id, role: UserRole.Viewer });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: null,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    const child = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+      parentDocumentId: parent.id,
+    });
+    const membership = await UserMembership.create({
+      createdById: admin.id,
+      documentId: parent.id,
+      userId: user.id,
+      permission: DocumentPermission.Read,
+    });
+
+    // No membership is cascaded to the child document.
+    expect(
+      await UserMembership.count({
+        where: { userId: user.id, documentId: child.id },
+      })
+    ).toEqual(0);
+
+    // Even an inherited membership created elsewhere does not grant access.
+    await UserMembership.create(
+      {
+        createdById: admin.id,
+        documentId: child.id,
+        userId: user.id,
+        permission: DocumentPermission.Read,
+        sourceId: membership.id,
+      },
+      { hooks: false }
+    );
+    const document = await Document.findByPk(child.id, { userId: user.id });
+    expect(serialize(user, document).read).toEqual(false);
+  });
+
+  it("should not allow access through a group membership", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({ teamId: team.id });
+    const user = await buildUser({ teamId: team.id, role: UserRole.Viewer });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: null,
+    });
+    const doc = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    const group = await buildGroup({ teamId: team.id });
+    await GroupUser.create({
+      groupId: group.id,
+      userId: user.id,
+      createdById: admin.id,
+    });
+    await GroupMembership.create({
+      createdById: admin.id,
+      groupId: group.id,
+      documentId: doc.id,
+      permission: DocumentPermission.Read,
+    });
+    const document = await Document.findByPk(doc.id, { userId: user.id });
+    expect(serialize(user, document).read).toEqual(false);
+  });
+});
+
+describe("viewer with a direct share", () => {
+  const setup = async (permission: DocumentPermission) => {
+    const team = await buildTeam();
+    team.setPreference(TeamPreference.Commenting, CommentingAccess.Everyone);
+    await team.save();
+    const admin = await buildAdmin({ teamId: team.id });
+    const user = await buildUser({ teamId: team.id, role: UserRole.Viewer });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: null,
+    });
+    const doc = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    await UserMembership.create({
+      userId: user.id,
+      documentId: doc.id,
+      permission,
+      createdById: admin.id,
+    });
+    return { team, admin, user, doc };
+  };
+
+  for (const permission of [
+    DocumentPermission.ReadWrite,
+    DocumentPermission.Admin,
+  ]) {
+    it(`should only allow reading, commenting and editing with ${permission}`, async () => {
+      const { user, doc } = await setup(permission);
+      const document = await Document.findByPk(doc.id, { userId: user.id });
+      const abilities = serialize(user, document);
+      expect(abilities.read).toBeTruthy();
+      expect(abilities.comment).toBeTruthy();
+      expect(abilities.update).toBeTruthy();
+      expect(abilities.createChildDocument).toEqual(false);
+      expect(abilities.duplicate).toEqual(false);
+      expect(abilities.manageUsers).toEqual(false);
+      expect(abilities.move).toEqual(false);
+      expect(abilities.archive).toEqual(false);
+      expect(abilities.delete).toEqual(false);
+      expect(abilities.share).toEqual(false);
+    });
+  }
+
+  it("should not get write access through a group membership", async () => {
+    const { team, admin, user, doc } = await setup(DocumentPermission.Read);
+    const group = await buildGroup({ teamId: team.id });
+    await GroupUser.create({
+      groupId: group.id,
+      userId: user.id,
+      createdById: admin.id,
+    });
+    await GroupMembership.create({
+      createdById: admin.id,
+      groupId: group.id,
+      documentId: doc.id,
+      permission: DocumentPermission.Admin,
+    });
+    const document = await Document.findByPk(doc.id, { userId: user.id });
+    const abilities = serialize(user, document);
+    expect(abilities.read).toBeTruthy();
+    expect(abilities.update).toEqual(false);
+    expect(abilities.manageUsers).toEqual(false);
   });
 });

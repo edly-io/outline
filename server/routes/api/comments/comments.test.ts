@@ -2,11 +2,11 @@ import { Node } from "prosemirror-model";
 import { prosemirrorToYDoc } from "y-prosemirror";
 import * as Y from "yjs";
 import type { ProsemirrorData, ReactionSummary } from "@shared/types";
-import { CommentStatusFilter } from "@shared/types";
+import { CommentStatusFilter, DocumentPermission } from "@shared/types";
 import { ProsemirrorHelper as SharedProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
 import documentCollaborativeUpdater from "@server/commands/documentCollaborativeUpdater";
 import { schema } from "@server/editor";
-import { Comment, Document, Reaction } from "@server/models";
+import { Comment, Document, Reaction, UserMembership } from "@server/models";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import {
   buildAdmin,
@@ -834,6 +834,12 @@ describe("#comments.create", () => {
       const document = await buildAnchorableDocument({
         userId: author.id,
         teamId: team.id,
+      });
+      await UserMembership.create({
+        createdById: author.id,
+        documentId: document.id,
+        userId: viewer.id,
+        permission: DocumentPermission.Read,
       });
 
       const res = await server.post("/api/comments.create", viewer, {

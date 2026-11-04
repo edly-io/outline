@@ -6,6 +6,7 @@ import {
   buildAdmin,
   buildGroup,
   buildGroupUser,
+  buildViewer,
 } from "@server/test/factories";
 import { getTestServer } from "@server/test/support";
 import { GroupPermission } from "@shared/types";
@@ -838,6 +839,22 @@ describe("#groups.memberships", () => {
 });
 
 describe("#groups.add_user", () => {
+  it("should not add a viewer to a group", async () => {
+    const admin = await buildAdmin();
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const group = await buildGroup({
+      teamId: admin.teamId,
+    });
+    const res = await server.post("/api/groups.add_user", admin, {
+      body: {
+        id: group.id,
+        userId: viewer.id,
+      },
+    });
+    expect(res.status).toEqual(400);
+    expect(await group.$count("users")).toEqual(0);
+  });
+
   it("should add user to group", async () => {
     const user = await buildAdmin();
     const group = await buildGroup({

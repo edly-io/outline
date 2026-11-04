@@ -5,12 +5,15 @@ import { BackIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import styled from "styled-components";
+import type { NavigationNode } from "@shared/types";
 import { DocumentPermission, UserRole } from "@shared/types";
 import type Document from "~/models/Document";
 import Group from "~/models/Group";
 import User from "~/models/User";
 import { Avatar, GroupAvatar, AvatarSize } from "~/components/Avatar";
 import NudeButton from "~/components/NudeButton";
+import Switch from "~/components/Switch";
 import { createAction } from "~/actions";
 import { UserSection } from "~/actions/sections";
 import useBoolean from "~/hooks/useBoolean";
@@ -67,6 +70,17 @@ function SharePopover({
   const [permission, setPermission] = React.useState<DocumentPermission>(
     DocumentPermission.Read
   );
+  const [includeChildDocuments, setIncludeChildDocuments] =
+    React.useState(false);
+
+  // Viewers do not inherit access to nested documents, so offer to share the
+  // current nested documents with them too.
+  const nestedDocumentCount = countNodes(document.children);
+  const hasPendingViewers = pendingIds.some(
+    (id) => isEmail(id) || !!users.get(id)?.isViewer
+  );
+  const showIncludeChildDocuments =
+    nestedDocumentCount > 0 && hasPendingViewers;
 
   const prevPendingIds = usePrevious(pendingIds);
 
@@ -170,6 +184,8 @@ function SharePopover({
                   documentId: document.id,
                   userId: user.id,
                   permission,
+                  includeChildDocuments:
+                    showIncludeChildDocuments && includeChildDocuments,
                 });
                 return user;
               }
@@ -248,6 +264,8 @@ function SharePopover({
       userMemberships,
       pendingIds,
       permission,
+      includeChildDocuments,
+      showIncludeChildDocuments,
       t,
       inviteRole,
       users,
@@ -395,6 +413,24 @@ function SharePopover({
         />
       )}
 
+      {picker && showIncludeChildDocuments && (
+        <NestedOption>
+          <Switch
+            label={t("Also share {{ count }} nested documents", {
+              count: nestedDocumentCount,
+            })}
+            labelPosition="right"
+            note={t(
+              "Viewers only see documents shared with them. Nested documents added later are not shared automatically."
+            )}
+            checked={includeChildDocuments}
+            onChange={setIncludeChildDocuments}
+            width={26}
+            height={14}
+          />
+        </NestedOption>
+      )}
+
       <div style={{ display: picker ? "none" : "block" }}>
         <AccessControlList
           document={document}
@@ -409,5 +445,19 @@ function SharePopover({
     </Wrapper>
   );
 }
+
+/**
+ * Count the nodes in a document tree.
+ *
+ * @param nodes The nodes to count.
+ * @returns The number of nodes, including all nested children.
+ */
+function countNodes(nodes: NavigationNode[]): number {
+  return nodes.reduce((sum, node) => sum + 1 + countNodes(node.children), 0);
+}
+
+const NestedOption = styled.div`
+  padding: 8px 4px 4px;
+`;
 
 export default observer(SharePopover);

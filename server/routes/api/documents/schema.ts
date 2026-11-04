@@ -672,6 +672,11 @@ export const DocumentsAddUserSchema = BaseSchema.extend({
     userId: z.uuid(),
     /** Permission to be granted to the added user */
     permission: z.enum(DocumentPermission).optional(),
+    /**
+     * Also share the current published child documents directly with the user.
+     * Only applies to viewers, other users inherit access to child documents.
+     */
+    includeChildDocuments: z.boolean().optional(),
   }),
 });
 

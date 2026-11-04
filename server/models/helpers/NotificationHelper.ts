@@ -38,6 +38,12 @@ export default class NotificationHelper {
       recipient.subscribedToEventType(eventType)
     );
 
+    // Only notify users that can access the collection, so that external users
+    // (viewers and guests) do not learn about it.
+    recipients = recipients.filter(
+      (recipient) => !recipient.isViewer && !recipient.isGuest
+    );
+
     return recipients;
   };
 

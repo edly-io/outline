@@ -492,6 +492,12 @@ router.post(
     });
     authorize(actor, "update", group);
 
+    if (user.isViewer) {
+      throw ValidationError(
+        "Viewers cannot be added to a group, share individual documents with them instead"
+      );
+    }
+
     if (group.externalGroups?.length) {
       throw ValidationError(
         "This group is managed by an external provider and its membership cannot be modified"

@@ -52,7 +52,7 @@ import { collectionIndexing } from "@server/utils/indexing";
 import { QueryHelper } from "@server/storage/QueryHelper";
 import pagination from "../middlewares/pagination";
 import * as T from "./schema";
-import { InvalidRequestError } from "@server/errors";
+import { InvalidRequestError, ValidationError } from "@server/errors";
 
 const router = new Router();
 
@@ -80,6 +80,10 @@ router.post(
 
     const { user } = ctx.state.auth;
     authorize(user, "createCollection", user.team);
+
+    if (permission) {
+      authorize(user, "createWorkspaceCollection", user.team);
+    }
 
     const collection = Collection.build({
       name,
@@ -197,6 +201,10 @@ router.post(
     const { attachmentId, permission, format } = ctx.input.body;
     const { user } = ctx.state.auth;
     authorize(user, "importCollection", user.team);
+
+    if (permission) {
+      authorize(user, "createWorkspaceCollection", user.team);
+    }
 
     const attachment = await Attachment.findByPk(attachmentId, {
       transaction,
@@ -406,6 +414,12 @@ router.post(
     ]);
     authorize(actor, "manageUsers", collection);
     authorize(actor, "read", user);
+
+    if (user.isViewer) {
+      throw ValidationError(
+        "Viewers cannot be added to a collection, share individual documents with them instead"
+      );
+    }
 
     let membership = await UserMembership.findOne({
       where: {
@@ -675,6 +689,11 @@ router.post(
           }
         );
       }
+    }
+
+    // Personal collections can never be opened, which is validated on save.
+    if (permission && !collection.permission && !collection.isPersonal) {
+      authorize(user, "createWorkspaceCollection", user.team);
     }
 
     let privacyChanged = false;
