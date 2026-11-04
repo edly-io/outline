@@ -53,6 +53,7 @@ export const AccessControlList = observer(
     const { memberships, groupMemberships } = useStores();
     const team = useCurrentTeam();
     const can = usePolicy(collection);
+    const teamCan = usePolicy(team);
     const { t } = useTranslation();
     const theme = useTheme();
     const collectionId = collection.id;
@@ -169,7 +170,11 @@ export const AccessControlList = observer(
                   }}
                   label={t("Access")}
                   labelHidden
-                  disabled={!can.manageUsers}
+                  disabled={
+                    !can.manageUsers ||
+                    (!collection.permission &&
+                      !teamCan.createWorkspaceCollection)
+                  }
                   short
                   nude
                 />

@@ -871,6 +871,27 @@ describe("#collections.export_all", () => {
 });
 
 describe("#collections.add_user", () => {
+  it("should not add a viewer to a collection", async () => {
+    const admin = await buildAdmin();
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      permission: null,
+    });
+    const res = await server.post("/api/collections.add_user", admin, {
+      body: {
+        id: collection.id,
+        userId: viewer.id,
+      },
+    });
+    expect(res.status).toEqual(400);
+    expect(
+      await UserMembership.count({
+        where: { collectionId: collection.id, userId: viewer.id },
+      })
+    ).toEqual(0);
+  });
+
   it("should add user to collection with manage permission", async () => {
     const user = await buildUser();
     const collection = await buildCollection({
@@ -1620,6 +1641,30 @@ describe("#collections.create", () => {
     expect(body.policies[0].abilities.read).toBeTruthy();
   });
 
+  it("should not allow members to create a workspace-wide collection", async () => {
+    const user = await buildUser();
+    const res = await server.post("/api/collections.create", user, {
+      body: {
+        name: "Test",
+        permission: CollectionPermission.Read,
+      },
+    });
+    expect(res.status).toEqual(403);
+  });
+
+  it("should allow admins to create a workspace-wide collection", async () => {
+    const admin = await buildAdmin();
+    const res = await server.post("/api/collections.create", admin, {
+      body: {
+        name: "Test",
+        permission: CollectionPermission.ReadWrite,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.permission).toEqual(CollectionPermission.ReadWrite);
+  });
+
   it("should error when index is invalid", async () => {
     const user = await buildUser();
     const res = await server.post("/api/collections.create", user, {
@@ -1811,9 +1856,31 @@ describe("#collections.duplicate", () => {
     expect(body.data.icon).toEqual("flame");
     expect(body.data.color).toEqual("#FF0000");
     expect(body.data.sharing).toEqual(false);
-    expect(body.data.permission).toEqual(collection.permission);
+
+    // Only admins can create workspace-wide collections, so the copy is restricted.
+    expect(body.data.permission).toEqual(null);
     expect(body.policies.length).toEqual(1);
     expect(body.policies[0].abilities.read).toBeTruthy();
+  });
+
+  it("should keep workspace access when duplicated by an admin", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({ teamId: team.id });
+    const collection = await buildCollection({
+      userId: admin.id,
+      teamId: team.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+
+    const res = await server.post("/api/collections.duplicate", admin, {
+      body: {
+        id: collection.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(body.data.permission).toEqual(CollectionPermission.ReadWrite);
   });
 
   it("should allow overriding the name", async () => {
@@ -1916,6 +1983,53 @@ describe("#collections.duplicate", () => {
 });
 
 describe("#collections.update", () => {
+  describe("workspace access", () => {
+    it("should not allow a collection manager to open a restricted collection", async () => {
+      const user = await buildUser();
+      const collection = await buildCollection({
+        userId: user.id,
+        teamId: user.teamId,
+        permission: null,
+      });
+      const res = await server.post("/api/collections.update", user, {
+        body: { id: collection.id, permission: CollectionPermission.Read },
+      });
+      expect(res.status).toEqual(403);
+      await collection.reload();
+      expect(collection.permission).toEqual(null);
+    });
+
+    it("should allow a collection manager to restrict a workspace-wide collection", async () => {
+      const user = await buildUser();
+      const collection = await buildCollection({
+        userId: user.id,
+        teamId: user.teamId,
+        permission: CollectionPermission.ReadWrite,
+      });
+      const res = await server.post("/api/collections.update", user, {
+        body: { id: collection.id, permission: null },
+      });
+      expect(res.status).toEqual(200);
+      await collection.reload();
+      expect(collection.permission).toEqual(null);
+    });
+
+    it("should allow admins to open a restricted collection", async () => {
+      const admin = await buildAdmin();
+      const collection = await buildCollection({
+        userId: admin.id,
+        teamId: admin.teamId,
+        permission: null,
+      });
+      const res = await server.post("/api/collections.update", admin, {
+        body: { id: collection.id, permission: CollectionPermission.Read },
+      });
+      expect(res.status).toEqual(200);
+      await collection.reload();
+      expect(collection.permission).toEqual(CollectionPermission.Read);
+    });
+  });
+
   describe("deprecatedReason", () => {
     it.each(["admin", "manager"])(
       "should let a collection %s save a reason without changing archive attribution",
@@ -1998,7 +2112,7 @@ describe("#collections.update", () => {
 
     it("should show the reason to readers", async () => {
       const owner = await buildUser();
-      const reader = await buildViewer({ teamId: owner.teamId });
+      const reader = await buildUser({ teamId: owner.teamId });
       const collection = await buildCollection({
         userId: owner.id,
         teamId: owner.teamId,

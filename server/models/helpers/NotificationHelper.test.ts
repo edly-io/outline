@@ -3,11 +3,15 @@ import { DocumentPermission, NotificationEventType } from "@shared/types";
 import { UserMembership, View } from "@server/models";
 import { sequelize } from "@server/storage/database";
 import {
+  buildAdmin,
+  buildCollection,
   buildComment,
   buildDocument,
   buildDraftDocument,
   buildSubscription,
+  buildGuestUser,
   buildUser,
+  buildViewer,
 } from "@server/test/factories";
 import NotificationHelper from "./NotificationHelper";
 
@@ -468,5 +472,30 @@ describe("NotificationHelper", () => {
       expect(recipients.length).toEqual(1);
       expect(recipients[0].id).toEqual(notificationEnabledUser.id);
     });
+  });
+});
+
+describe("getCollectionNotificationRecipients", () => {
+  it("should not include viewers or guests", async () => {
+    const admin = await buildAdmin();
+    const member = await buildUser({ teamId: admin.teamId });
+    const viewer = await buildViewer({ teamId: admin.teamId });
+    const guest = await buildGuestUser({ teamId: admin.teamId });
+    for (const user of [member, viewer, guest]) {
+      user.setNotificationEventType(NotificationEventType.CreateCollection);
+      await user.save();
+    }
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+    });
+
+    const recipients =
+      await NotificationHelper.getCollectionNotificationRecipients(
+        collection,
+        NotificationEventType.CreateCollection
+      );
+
+    expect(recipients.map((recipient) => recipient.id)).toEqual([member.id]);
   });
 });

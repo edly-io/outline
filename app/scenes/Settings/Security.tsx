@@ -38,7 +38,7 @@ function Security() {
       [
         {
           type: "item",
-          label: t("Editor"),
+          label: t("Member"),
           value: "member",
         },
         {
@@ -260,7 +260,7 @@ function Security() {
       <SettingRow
         label={t("Allow users to send invites")}
         name={TeamPreference.MembersCanInvite}
-        description={t("Allow editors to invite other people to the workspace")}
+        description={t("Allow members to invite other people to the workspace")}
       >
         <Switch
           id={TeamPreference.MembersCanInvite}
@@ -381,7 +381,7 @@ function Security() {
         label={t("Personal documents")}
         name={TeamPreference.PersonalDocs}
         description={t(
-          "Allow editors to create personal documents that are only visible to themselves and the people they share them with"
+          "Allow members to create personal documents that are only visible to themselves and the people they share them with"
         )}
       >
         <Switch
@@ -394,7 +394,7 @@ function Security() {
         label={t("Collection creation")}
         name="memberCollectionCreate"
         description={t(
-          "Allow editors to create new collections within the workspace"
+          "Allow members to create new collections within the workspace"
         )}
       >
         <Switch
@@ -407,7 +407,7 @@ function Security() {
         <SettingRow
           label={t("Workspace creation")}
           name="memberTeamCreate"
-          description={t("Allow editors to create new workspaces")}
+          description={t("Allow members to create new workspaces")}
         >
           <Switch
             id="memberTeamCreate"

@@ -299,16 +299,12 @@ describe("#users.list", () => {
     expect(res.status).toEqual(403);
   });
 
-  it("should restrict viewer from viewing other user's email", async () => {
+  it("should not allow viewers to list users", async () => {
     const team = await buildTeam();
     await buildUser({ teamId: team.id });
     const viewer = await buildUser({ teamId: team.id, role: UserRole.Viewer });
     const res = await server.post("/api/users.list", viewer);
-    const body = await res.json();
-    expect(res.status).toEqual(200);
-    expect(body.data).toHaveLength(2);
-    expect(body.data[0].email).toEqual(undefined);
-    expect(body.data[1].email).toEqual(viewer.email);
+    expect(res.status).toEqual(403);
   });
 
   it("should allow member to view other user's email", async () => {
@@ -321,24 +317,6 @@ describe("#users.list", () => {
     expect(body.data).toHaveLength(2);
     expect(body.data[0].email).toEqual(user.email);
     expect(body.data[1].email).toEqual(member.email);
-  });
-
-  it("should restrict viewer from viewing other user's details", async () => {
-    const team = await buildTeam();
-    await buildUser({ teamId: team.id });
-    const viewer = await buildUser({ teamId: team.id, role: UserRole.Viewer });
-    const res = await server.post("/api/users.list", viewer);
-    const body = await res.json();
-    expect(res.status).toEqual(200);
-    expect(body.data).toHaveLength(2);
-    expect(body.data[0].language).toEqual(undefined);
-    expect(body.data[0].preferences).toEqual(undefined);
-    expect(body.data[0].notificationSettings).toEqual(undefined);
-    expect(body.data[1].language).toEqual(viewer.language);
-    expect(body.data[1].preferences).toEqual(viewer.preferences);
-    expect(body.data[1].notificationSettings).toEqual(
-      viewer.notificationSettings
-    );
   });
 
   it("should restrict member from viewing other user's details", async () => {

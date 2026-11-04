@@ -873,6 +873,17 @@ export class Environment {
   );
 
   /**
+   * Comma-separated list of email domains that belong to internal staff. When
+   * set, users with an email outside of these domains are treated as external
+   * (for example clients) and can only have the Viewer role.
+   * Example: "arbisoft.com,edly.io"
+   */
+  @IsOptional()
+  public INTERNAL_EMAIL_DOMAINS = this.toOptionalCommaList(
+    environment.INTERNAL_EMAIL_DOMAINS
+  );
+
+  /**
    * The search provider to use. Defaults to "postgres" which uses PostgreSQL
    * full-text search. Alternative providers can be registered via plugins.
    */

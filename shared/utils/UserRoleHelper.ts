@@ -20,7 +20,7 @@ export class UserRoleHelper {
       case UserRole.Viewer:
         return t("Viewer");
       case UserRole.Member:
-        return t("Editor");
+        return t("Member");
       case UserRole.Admin:
         return t("Admin");
     }

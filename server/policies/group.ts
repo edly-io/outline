@@ -16,11 +16,14 @@ allow(User, "createGroup", Team, (actor, team) =>
   )
 );
 
+// Viewers cannot see groups, matching guests, so that external users do not
+// learn the workspace's internal team structure.
 allow(User, "listGroups", Team, (actor, team) =>
   and(
     //
     isTeamModel(actor, team),
-    !actor.isGuest
+    !actor.isGuest,
+    !actor.isViewer
   )
 );
 
@@ -28,7 +31,8 @@ allow(User, "read", Group, (actor, group) =>
   and(
     //
     isTeamModel(actor, group),
-    !actor.isGuest
+    !actor.isGuest,
+    !actor.isViewer
   )
 );
 
