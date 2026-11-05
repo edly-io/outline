@@ -1,0 +1,131 @@
+name: Edly deploy
+
+# Deploys an Edly image to docs.edly.space, rolls back the last deploy, or shows
+# the status of the site. The work is done on the server by
+# deploy/edly-deploy.sh, which takes a full backup before switching and restores
+# it automatically when any check fails, so the site always ends up running.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [deploy, status, rollback]
+        default: deploy
+      version:
+        description: "Image to deploy: `edly` for the latest build of the edly branch, or a tag such as `sha-5026530`"
+        type: string
+        default: edly
+
+# Only one deploy or rollback at a time, and never cancel one halfway.
+concurrency:
+  group: edly-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/edly-io/outline
+  DEPLOY_HOST: sandbox.openedx.edly.io
+  DEPLOY_PORT: "2024"
+  DEPLOY_USER: ubuntu
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # The server key is a secret of this environment, which only accepts runs
+    # from the edly branch.
+    environment:
+      name: production
+      url: https://docs.edly.space
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the image
+        if: inputs.action == 'deploy'
+        id: image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$ ]]; then
+            echo "::error::'$VERSION' is not a valid image tag"
+            exit 1
+          fi
+          digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Could not find the image $IMAGE:$VERSION"
+            exit 1
+          fi
+          docker pull -q "$IMAGE@$digest" > /dev/null
+          revision=$(docker image inspect "$IMAGE@$digest" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+          if ! git merge-base --is-ancestor "$revision" origin/edly 2>/dev/null; then
+            echo "::error::$IMAGE:$VERSION was built from $revision, which is not on the edly branch"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deploying \`$IMAGE:$VERSION\`"
+            echo "- Digest: \`$digest\`"
+            echo "- Commit: [\`${revision:0:9}\`](https://github.com/edly-io/outline/commit/$revision) $(git log -1 --format=%s "$revision")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Run on the server
+        env:
+          ACTION: ${{ inputs.action }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          # Errors are handled below, the step must not stop at the first one.
+          set +e
+          # A margin for clock differences between the runner and the server.
+          started=$(( $(date +%s) - 120 ))
+          command="$ACTION"
+          if [ "$ACTION" = deploy ]; then
+            command="deploy $DIGEST"
+          fi
+          ssh_run() {
+            ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              -o ServerAliveInterval=30 -o ConnectTimeout=20 \
+              "$DEPLOY_USER@$DEPLOY_HOST" "$1" 2>&1 | tee -a server.log
+            return "${PIPESTATUS[0]}"
+          }
+          ssh_run "$command"
+          status=$?
+
+          # 255 means the SSH connection failed. The deploy keeps running on the
+          # server, so reconnect and follow it until it ends.
+          attempt=0
+          while [ "$status" = 255 ] && [ "$ACTION" != status ] && [ "$attempt" -lt 30 ]; do
+            attempt=$((attempt + 1))
+            echo "::warning::Connection lost, reconnecting to follow the deploy (attempt $attempt)"
+            sleep 20
+            ssh_run "wait $started"
+            status=$?
+          done
+
+          {
+            echo "### Server log"
+            echo '```'
+            cat server.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
