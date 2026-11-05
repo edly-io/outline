@@ -8810,7 +8810,7 @@ describe("#documents.users", () => {
 });
 
 describe("document permission management authorization", () => {
-  it("should prevent collection read_write members from managing document users and groups", async () => {
+  it("should allow collection read_write members to share documents with staff", async () => {
     const team = await buildTeam();
     const actor = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
@@ -8824,12 +8824,84 @@ describe("document permission management authorization", () => {
     const member = await buildUser({ teamId: team.id });
     const group = await buildGroup({ teamId: team.id });
 
-    await expectCannotManageDocumentPermissions({
+    await expectCanManageDocumentPermissions({
       actor,
       document,
       member,
       group,
     });
+  });
+
+  it("should prevent collection read_write members from sharing with viewers or restricting", async () => {
+    const team = await buildTeam();
+    const actor = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const document = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    const viewer = await buildViewer({ teamId: team.id });
+
+    const addViewer = await server.post("/api/documents.add_user", actor, {
+      body: { id: document.id, userId: viewer.id },
+    });
+    expect(addViewer.status).toEqual(403);
+    expect(
+      await UserMembership.count({
+        where: { documentId: document.id, userId: viewer.id },
+      })
+    ).toEqual(0);
+
+    // An existing share with a viewer cannot be changed by a member either.
+    await UserMembership.create({
+      userId: viewer.id,
+      documentId: document.id,
+      permission: DocumentPermission.Read,
+      createdById: actor.id,
+    });
+    const updateViewer = await server.post("/api/documents.add_user", actor, {
+      body: {
+        id: document.id,
+        userId: viewer.id,
+        permission: DocumentPermission.ReadWrite,
+      },
+    });
+    expect(updateViewer.status).toEqual(403);
+
+    const restrict = await server.post("/api/documents.update", actor, {
+      body: { id: document.id, isPrivate: true },
+    });
+    expect(restrict.status).toEqual(403);
+  });
+
+  it("should allow collection managers to share documents with viewers", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({ teamId: team.id });
+    const actor = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      userId: admin.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    await collection.$add("user", actor, {
+      through: {
+        permission: CollectionPermission.Admin,
+        createdById: admin.id,
+      },
+    });
+    const document = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    const viewer = await buildViewer({ teamId: team.id });
+
+    const res = await server.post("/api/documents.add_user", actor, {
+      body: { id: document.id, userId: viewer.id },
+    });
+    expect(res.status).toEqual(200);
   });
 
   it("should allow collection admins to manage document users and groups", async () => {

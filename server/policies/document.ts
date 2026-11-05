@@ -134,7 +134,24 @@ allow(User, "publish", Document, (actor, document) =>
   )
 );
 
+// Staff who can edit the documents in a collection may share them with
+// colleagues, as before v1.12. Sharing with viewers, restricting a document and
+// answering access requests need manageAccess.
 allow(User, "manageUsers", Document, (actor, document) =>
+  or(
+    can(actor, "manageAccess", document),
+    and(
+      !actor.isViewer,
+      !actor.isGuest,
+      isTeamMutable(actor),
+      !document?.isPrivate,
+      can(actor, "read", document),
+      can(actor, "updateDocument", document?.collection)
+    )
+  )
+);
+
+allow(User, "manageAccess", Document, (actor, document) =>
   and(
     // Viewers are external users and cannot share documents further.
     !actor.isViewer,

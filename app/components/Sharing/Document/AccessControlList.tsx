@@ -130,7 +130,7 @@ export const AccessControlList = observer(
             maxHeight: maxHeight ? maxHeight - publicAccessHeight : undefined,
           }}
         >
-          {!document.isDraft && can.manageUsers && (
+          {!document.isDraft && can.manageAccess && (
             <>
               <ListItem
                 image={
@@ -164,7 +164,7 @@ export const AccessControlList = observer(
                     label={t("Access")}
                     labelHidden
                     short
-                    disabled={!can.manageUsers || isRestrictionInherited}
+                    disabled={!can.manageAccess || isRestrictionInherited}
                     nude
                   />
                 }

@@ -20,6 +20,7 @@ import Placeholder from "~/components/List/Placeholder";
 import Scrollable from "~/components/Scrollable";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useMaxHeight from "~/hooks/useMaxHeight";
+import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import useThrottledCallback from "~/hooks/useThrottledCallback";
 import { GroupMembersPopover } from "./GroupMembersPopover";
@@ -62,6 +63,7 @@ export const Suggestions = observer(function Suggestions({
   const { users, groups } = useStores();
   const { t } = useTranslation();
   const user = useCurrentUser();
+  const can = usePolicy(document);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const { maxHeight } = useMaxHeight({
     elementRef: containerRef,
@@ -98,6 +100,8 @@ export const Suggestions = observer(function Suggestions({
         ? users
             .notInDocument(document.id, query)
             .filter((u) => u.id !== user.id)
+            // Only managers may share a document with external users.
+            .filter((u) => !u.isViewer || can.manageAccess)
         : collection
           ? users.notInCollection(collection.id, query)
           : users.activeOrInvited
@@ -126,6 +130,7 @@ export const Suggestions = observer(function Suggestions({
     groups.orderedData,
     document?.id,
     document?.members,
+    can.manageAccess,
     collection?.id,
     user.id,
     query,
