@@ -42,12 +42,38 @@ describe("read_write collection", () => {
     expect(abilities.download).toBeTruthy();
     expect(abilities.update).toBeTruthy();
     expect(abilities.createChildDocument).toBeTruthy();
-    expect(abilities.manageUsers).toEqual(false);
+    expect(abilities.manageUsers).toBeTruthy();
+    expect(abilities.manageAccess).toEqual(false);
     expect(abilities.archive).toBeTruthy();
     expect(abilities.delete).toBeTruthy();
     expect(abilities.share).toBeTruthy();
     expect(abilities.move).toBeTruthy();
     expect(abilities.comment).toBeTruthy();
+  });
+
+  it("should not allow members to manage users of restricted documents", async () => {
+    const team = await buildTeam();
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const doc = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    await UserMembership.create({
+      userId: user.id,
+      documentId: doc.id,
+      permission: DocumentPermission.ReadWrite,
+      createdById: user.id,
+    });
+    await doc.update({ isPrivate: true });
+    const document = await Document.findByPk(doc.id, { userId: user.id });
+    const abilities = serialize(user, document);
+    expect(abilities.read).toBeTruthy();
+    expect(abilities.manageUsers).toEqual(false);
+    expect(abilities.manageAccess).toEqual(false);
   });
 
   it("should allow user management for collection admins", async () => {

@@ -394,6 +394,34 @@ describe("#accessRequests.approve", () => {
     expect(res.status).toEqual(403);
   });
 
+  it("should not allow collection members who can edit to approve requests", async () => {
+    const team = await buildTeam();
+    const requester = await buildUser({ teamId: team.id });
+    const editor = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const document = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+    const accessRequest = await AccessRequest.create({
+      documentId: document.id,
+      userId: requester.id,
+      teamId: team.id,
+    });
+
+    const res = await server.post("/api/accessRequests.approve", editor, {
+      body: {
+        id: accessRequest.id,
+        permission: DocumentPermission.ReadWrite,
+      },
+    });
+
+    expect(res.status).toEqual(403);
+  });
+
   it("should be a no-op when user already has membership", async () => {
     const team = await buildTeam();
     const requester = await buildUser({ teamId: team.id });

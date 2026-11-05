@@ -107,7 +107,7 @@ router.post(
       transaction,
       rejectOnEmpty: true,
     });
-    authorize(user, "manageUsers", document);
+    authorize(user, "manageAccess", document);
     authorize(user, "read", accessRequest.user);
 
     if (accessRequest.status !== AccessRequestStatus.Pending) {
@@ -163,7 +163,7 @@ router.post(
       transaction,
       rejectOnEmpty: true,
     });
-    authorize(user, "manageUsers", document);
+    authorize(user, "manageAccess", document);
     authorize(user, "read", accessRequest.user);
 
     if (accessRequest.status === AccessRequestStatus.Pending) {

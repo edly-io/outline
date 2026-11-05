@@ -1539,7 +1539,7 @@ router.post(
     // Handle restrict/unrestrict toggle — validation and descendant cascade
     // are enforced by Document model hooks (@BeforeUpdate and @AfterUpdate)
     if (isPrivate !== undefined && isPrivate !== document.isPrivate) {
-      authorize(user, "manageUsers", document);
+      authorize(user, "manageAccess", document);
 
       if (!isPrivate) {
         // When a restriction is removed inside a restricted tree, the
@@ -2031,6 +2031,11 @@ router.post(
     authorize(actor, "manageUsers", document);
     authorize(actor, "read", user);
 
+    // Only managers may share with external users.
+    if (user.isViewer || user.isGuest) {
+      authorize(actor, "manageAccess", document);
+    }
+
     const UserMemberships = await UserMembership.findAll({
       where: {
         userId,
@@ -2099,7 +2104,7 @@ router.post(
       });
 
       for (const child of childDocuments) {
-        if (!can(actor, "manageUsers", child)) {
+        if (!can(actor, "manageAccess", child)) {
           continue;
         }
 

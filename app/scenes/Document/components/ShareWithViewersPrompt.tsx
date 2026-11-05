@@ -51,7 +51,7 @@ function ShareWithViewersPrompt({ document }: Props) {
       !parentDocumentId ||
       !publishedAt ||
       !isAuthor ||
-      !can.manageUsers ||
+      !can.manageAccess ||
       new Date(publishedAt) < subMinutes(new Date(), PROMPT_WITHIN_MINUTES) ||
       hasPrompted(document.id)
     ) {
@@ -125,7 +125,7 @@ function ShareWithViewersPrompt({ document }: Props) {
       cancelled = true;
     };
   }, [
-    can.manageUsers,
+    can.manageAccess,
     dialogs,
     document,
     isAuthor,

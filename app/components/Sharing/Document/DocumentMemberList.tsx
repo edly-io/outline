@@ -209,7 +209,7 @@ function DocumentMemberList({ document, invitedInSession }: Props) {
           membership={item.getMembership(document)}
           onRemove={() => handleRemoveUser(item)}
           onUpdate={
-            can.manageUsers
+            can.manageUsers && (!item.isViewer || can.manageAccess)
               ? (permission) => handleUpdateUser(item, permission)
               : undefined
           }
